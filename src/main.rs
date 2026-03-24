@@ -256,34 +256,12 @@ async fn main() -> Result<()> {
             AppEvent::Tick => {
                 app.tick += 1;
 
-                // Initialize stage lazily (needs terminal size)
                 if !app.stage.initialized {
-                    let term_size = terminal.size()?;
-                    let stage_area_height = term_size.height.saturating_sub(5); // tab + status
-                    let stage_area_width = term_size.width;
-                    app.stage
-                        .init(stage_area_width as usize, (stage_area_height as usize) * 2);
+                    app.stage.initialized = true;
                 }
-
-                // Sync agents
-                app.stage.sync_agents(&snap.agents);
-
-                // Spawn big dots for new events with tool usage
-                if snap.feed.len() > app.last_feed_count {
-                    for event in snap.feed.iter().skip(app.last_feed_count) {
-                        if event.tool_name.is_some() {
-                            app.stage.spawn_big_dot(&event.agent_id);
-                        }
-                    }
-                    app.last_feed_count = snap.feed.len();
-                }
-
-                // Advance stage animation
-                app.stage.tick();
+                app.stage.tick += 1;
             }
-            AppEvent::Resize(_, _) => {
-                app.stage.initialized = false;
-            }
+            AppEvent::Resize(_, _) => {}
         }
     }
 

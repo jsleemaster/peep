@@ -59,6 +59,7 @@ pub struct App {
     // Stage state
     pub stage: StageState,
     pub tick: usize,
+    #[allow(dead_code)]
     pub last_feed_count: usize,
 }
 
