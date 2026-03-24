@@ -41,9 +41,9 @@ pub fn render_agent_detail(f: &mut Frame, app: &App, snap: &StoreSnapshot) {
     let mut lines = Vec::new();
 
     let (state_icon, state_color) = match agent.state {
-        AgentState::Active => ("*", Color::Green),
-        AgentState::Waiting => ("o", Color::Yellow),
-        AgentState::Completed => ("v", Color::DarkGray),
+        AgentState::Active => ("●", Color::Green),
+        AgentState::Waiting => ("◐", Color::Yellow),
+        AgentState::Completed => ("✓", Color::DarkGray),
     };
 
     lines.push(Line::from(vec![
@@ -101,8 +101,9 @@ pub fn render_agent_detail(f: &mut Frame, app: &App, snap: &StoreSnapshot) {
     lines.push(Line::raw(""));
 
     if let Some(ctx) = agent.context_percent {
-        let filled = ((ctx / 100.0) * 20.0) as usize;
-        let empty = 20_usize.saturating_sub(filled);
+        let gauge_width = 20usize;
+        let filled = ((ctx / 100.0) * gauge_width as f64) as usize;
+        let empty = gauge_width.saturating_sub(filled);
         let gauge_color = if ctx > 80.0 {
             Color::Red
         } else if ctx > 60.0 {
@@ -113,8 +114,8 @@ pub fn render_agent_detail(f: &mut Frame, app: &App, snap: &StoreSnapshot) {
 
         lines.push(Line::from(vec![
             Span::styled(" Context: ", Style::default().fg(Color::DarkGray)),
-            Span::styled("#".repeat(filled), Style::default().fg(gauge_color)),
-            Span::styled("-".repeat(empty), Style::default().fg(Color::DarkGray)),
+            Span::styled("█".repeat(filled), Style::default().fg(gauge_color)),
+            Span::styled("░".repeat(empty), Style::default().fg(Color::DarkGray)),
             Span::styled(format!(" {:.0}%", ctx), Style::default().fg(gauge_color)),
         ]));
     }
@@ -147,7 +148,7 @@ pub fn render_agent_detail(f: &mut Frame, app: &App, snap: &StoreSnapshot) {
                 format!("   {:<8}", format!("{}", skill)),
                 Style::default().fg(skill_color),
             ),
-            Span::styled("#".repeat(bar_len), Style::default().fg(skill_color)),
+            Span::styled("█".repeat(bar_len), Style::default().fg(skill_color)),
             Span::styled(format!(" {}", count), Style::default().fg(Color::DarkGray)),
         ]));
     }

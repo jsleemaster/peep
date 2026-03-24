@@ -178,9 +178,9 @@ fn render_agents_tab(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         .enumerate()
         .map(|(i, agent)| {
             let (icon, state_color) = match agent.state {
-                AgentState::Active => ("* active", Color::Green),
-                AgentState::Waiting => ("o waiting", Color::Yellow),
-                AgentState::Completed => ("v done", Color::DarkGray),
+                AgentState::Active => ("● active", Color::Green),
+                AgentState::Waiting => ("◐ waiting", Color::Yellow),
+                AgentState::Completed => ("✓ done", Color::DarkGray),
             };
 
             let ctx_str = agent
