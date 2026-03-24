@@ -1,7 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::tui::sprites::stage_state::StageState;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
+    Stage,
     Feed,
     Agents,
     Sessions,
@@ -11,6 +14,7 @@ impl Tab {
     #[allow(dead_code)]
     pub fn label(&self) -> &'static str {
         match self {
+            Tab::Stage => "Stage",
             Tab::Feed => "Feed",
             Tab::Agents => "Agents",
             Tab::Sessions => "Sessions",
@@ -18,7 +22,7 @@ impl Tab {
     }
 
     pub fn all() -> &'static [Tab] {
-        &[Tab::Feed, Tab::Agents, Tab::Sessions]
+        &[Tab::Stage, Tab::Feed, Tab::Agents, Tab::Sessions]
     }
 }
 
@@ -28,7 +32,6 @@ pub enum FocusPane {
     MainPanel,
 }
 
-#[derive(Debug)]
 pub struct App {
     pub active_tab: Tab,
     pub focus: FocusPane,
@@ -52,12 +55,17 @@ pub struct App {
     pub session_count: usize,
 
     pub port: u16,
+
+    // Stage state
+    pub stage: StageState,
+    pub tick: usize,
+    pub last_feed_count: usize,
 }
 
 impl App {
     pub fn new(port: u16) -> Self {
         App {
-            active_tab: Tab::Feed,
+            active_tab: Tab::Stage,
             focus: FocusPane::MainPanel,
             running: true,
             show_detail_overlay: false,
@@ -72,6 +80,9 @@ impl App {
             feed_count: 0,
             session_count: 0,
             port,
+            stage: StageState::new(),
+            tick: 0,
+            last_feed_count: 0,
         }
     }
 
@@ -132,9 +143,10 @@ impl App {
             // Tab switching
             KeyCode::Tab => self.next_tab(),
             KeyCode::BackTab => self.prev_tab(),
-            KeyCode::Char('1') => self.active_tab = Tab::Feed,
-            KeyCode::Char('2') => self.active_tab = Tab::Agents,
-            KeyCode::Char('3') => self.active_tab = Tab::Sessions,
+            KeyCode::Char('1') => self.active_tab = Tab::Stage,
+            KeyCode::Char('2') => self.active_tab = Tab::Feed,
+            KeyCode::Char('3') => self.active_tab = Tab::Agents,
+            KeyCode::Char('4') => self.active_tab = Tab::Sessions,
 
             // Focus switching
             KeyCode::Char('h') | KeyCode::Left => self.focus = FocusPane::Sidebar,
@@ -165,15 +177,17 @@ impl App {
 
     fn next_tab(&mut self) {
         self.active_tab = match self.active_tab {
+            Tab::Stage => Tab::Feed,
             Tab::Feed => Tab::Agents,
             Tab::Agents => Tab::Sessions,
-            Tab::Sessions => Tab::Feed,
+            Tab::Sessions => Tab::Stage,
         };
     }
 
     fn prev_tab(&mut self) {
         self.active_tab = match self.active_tab {
-            Tab::Feed => Tab::Sessions,
+            Tab::Stage => Tab::Sessions,
+            Tab::Feed => Tab::Stage,
             Tab::Agents => Tab::Feed,
             Tab::Sessions => Tab::Agents,
         };
@@ -188,6 +202,7 @@ impl App {
                 }
             }
             FocusPane::MainPanel => match self.active_tab {
+                Tab::Stage => {} // no scrolling on stage
                 Tab::Feed => {
                     let max = self.feed_count.saturating_sub(1);
                     if self.feed_scroll_offset < max {
@@ -220,6 +235,7 @@ impl App {
                 self.sidebar_selected = self.sidebar_selected.saturating_sub(1);
             }
             FocusPane::MainPanel => match self.active_tab {
+                Tab::Stage => {}
                 Tab::Feed => {
                     if self.feed_scroll_offset > 0 {
                         self.feed_scroll_offset = self.feed_scroll_offset.saturating_sub(1);
@@ -240,6 +256,7 @@ impl App {
         match self.focus {
             FocusPane::Sidebar => self.sidebar_selected = 0,
             FocusPane::MainPanel => match self.active_tab {
+                Tab::Stage => {}
                 Tab::Feed => {
                     self.feed_scroll_offset = 0;
                     self.feed_auto_scroll = false;
@@ -256,6 +273,7 @@ impl App {
                 self.sidebar_selected = self.agent_count.saturating_sub(1);
             }
             FocusPane::MainPanel => match self.active_tab {
+                Tab::Stage => {}
                 Tab::Feed => {
                     self.feed_scroll_offset = self.feed_count.saturating_sub(1);
                     self.feed_auto_scroll = true;

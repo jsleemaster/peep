@@ -6,16 +6,59 @@ use ratatui::{
     Frame,
 };
 
+use crate::protocol::types::AgentState;
 use crate::store::state::AppStore;
-use crate::tui::app::App;
+use crate::tui::app::{App, Tab};
 use crate::tui::render::StoreSnapshot;
+use crate::tui::sprites::characters;
 
-pub fn render_status_bar(f: &mut Frame, area: Rect, _app: &App, snap: &StoreSnapshot) {
+pub fn render_status_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
     let m = &snap.metrics;
 
     let block = Block::default()
         .borders(Borders::TOP)
         .border_style(Style::default().fg(Color::DarkGray));
+
+    // On Stage tab, show agent color legend
+    if app.active_tab == Tab::Stage && !snap.agents.is_empty() {
+        let mut spans = vec![Span::raw(" ")];
+        for agent in &snap.agents {
+            let (body_color, _) = characters::agent_colors(&agent.agent_id);
+            spans.push(Span::styled(
+                "\u{25CF}",
+                Style::default().fg(body_color),
+            ));
+            spans.push(Span::styled(
+                &agent.display_name,
+                Style::default().fg(Color::White),
+            ));
+            spans.push(Span::raw(" "));
+
+            let state_str = match agent.state {
+                AgentState::Active => {
+                    let skill = agent
+                        .current_skill
+                        .map(|s| format!("{}", s))
+                        .unwrap_or_else(|| "...".into());
+                    format!("⚡{}", skill)
+                }
+                AgentState::Waiting => "💤wait".into(),
+                AgentState::Completed => "✓".into(),
+            };
+            let state_color = match agent.state {
+                AgentState::Active => Color::Green,
+                AgentState::Waiting => Color::Yellow,
+                AgentState::Completed => Color::DarkGray,
+            };
+            spans.push(Span::styled(state_str, Style::default().fg(state_color)));
+            spans.push(Span::styled("  ", Style::default()));
+        }
+
+        let line = Line::from(spans);
+        let paragraph = Paragraph::new(line).block(block);
+        f.render_widget(paragraph, area);
+        return;
+    }
 
     // Mini sparkline for recent velocity
     let spark_str = if !snap.sparkline.is_empty() {

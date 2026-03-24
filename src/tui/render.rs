@@ -9,7 +9,7 @@ use ratatui::{
 use crate::protocol::types::*;
 use crate::store::state::AppStore;
 use crate::tui::app::{App, Tab};
-use crate::tui::widgets::{agent_detail, agent_sidebar, feed_table, session_table, status_bar, tab_bar};
+use crate::tui::widgets::{agent_detail, agent_sidebar, feed_table, session_table, stage, status_bar, tab_bar};
 
 /// A snapshot of the store for rendering (avoids holding the lock during draw).
 pub struct StoreSnapshot {
@@ -57,6 +57,7 @@ pub fn draw(f: &mut Frame, app: &App, snap: &StoreSnapshot) {
 
     // Body depends on active tab
     match app.active_tab {
+        Tab::Stage => stage::render_stage(f, outer_chunks[1], app, snap),
         Tab::Feed => render_feed_layout(f, outer_chunks[1], app, snap),
         Tab::Agents => render_agents_tab(f, outer_chunks[1], app, snap),
         Tab::Sessions => session_table::render_session_table(f, outer_chunks[1], app, snap),

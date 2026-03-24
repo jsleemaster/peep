@@ -1,4 +1,5 @@
 mod collector;
+mod config;
 mod protocol;
 mod store;
 mod tui;
@@ -17,26 +18,32 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
+use crate::config::Config;
 use crate::store::state::AppStore;
 use crate::tui::app::App;
 use crate::tui::event::{AppEvent, EventHandler};
 use crate::tui::render::{self, StoreSnapshot};
 
 #[derive(Parser, Debug)]
-#[command(name = "packmen", about = "Terminal dashboard for Claude Code agents")]
+#[command(
+    name = "packmen",
+    about = "Terminal dashboard for monitoring Claude Code agent sessions",
+    long_about = None
+)]
 struct Cli {
-    /// HTTP hook server port
-    #[arg(long, default_value_t = 3100)]
-    port: u16,
+    /// HTTP hook server port (overrides config file)
+    #[arg(long)]
+    port: Option<u16>,
 
-    /// HTTP hook server bind address
-    #[arg(long, default_value = "127.0.0.1")]
-    bind: String,
+    /// HTTP hook server bind address (overrides config file)
+    #[arg(long)]
+    bind: Option<String>,
 
-    /// Tick rate in milliseconds
-    #[arg(long, default_value_t = 100)]
-    tick_rate: u64,
+    /// Tick rate in milliseconds (overrides config file)
+    #[arg(long)]
+    tick_rate: Option<u64>,
 
     /// JSONL watch directory (defaults to ~/.claude/projects/)
     #[arg(long)]
@@ -45,6 +52,14 @@ struct Cli {
     /// Disable JSONL watcher
     #[arg(long)]
     no_jsonl: bool,
+
+    /// Populate store with synthetic demo data (HTTP server still runs)
+    #[arg(long)]
+    mock: bool,
+
+    /// Write tracing logs to this file path
+    #[arg(long)]
+    log_file: Option<PathBuf>,
 }
 
 /// Guard that restores terminal on drop (including panics)
@@ -61,7 +76,52 @@ impl Drop for TerminalGuard {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Set up panic hook to restore terminal
+    // ----------------------------------------------------------------
+    // Load config file (missing file = defaults; parse errors are fatal)
+    // ----------------------------------------------------------------
+    let cfg = Config::load().unwrap_or_else(|e| {
+        eprintln!("Warning: failed to load config file: {e}");
+        Config::default()
+    });
+
+    // CLI args override config file values
+    let port = cli.port.unwrap_or(cfg.server.port);
+    let bind = cli.bind.unwrap_or(cfg.server.bind);
+    let tick_rate = cli.tick_rate.unwrap_or(cfg.tui.tick_rate);
+    let watcher_enabled = cfg.watcher.enabled && !cli.no_jsonl;
+    let watch_dir = cli.watch_dir.or(cfg.watcher.watch_dir);
+
+    // ----------------------------------------------------------------
+    // Tracing / logging
+    // ----------------------------------------------------------------
+    if let Some(log_path) = &cli.log_file {
+        let parent = log_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let file_name = log_path
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("packmen.log"));
+
+        let file_appender = tracing_appender::rolling::never(parent, file_name);
+        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+        // _guard must stay alive for the duration of main — store in a Box to avoid
+        // it being dropped immediately (the compiler warns if we name it _).
+        Box::leak(Box::new(_guard));
+
+        tracing_subscriber::fmt()
+            .with_writer(non_blocking)
+            .with_ansi(false)
+            .init();
+    }
+
+    // ----------------------------------------------------------------
+    // Shutdown token — shared across all background tasks
+    // ----------------------------------------------------------------
+    let shutdown = CancellationToken::new();
+
+    // ----------------------------------------------------------------
+    // Panic hook: restore terminal then run original handler
+    // ----------------------------------------------------------------
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |panic_info| {
         let _ = disable_raw_mode();
@@ -69,61 +129,108 @@ async fn main() -> Result<()> {
         original_hook(panic_info);
     }));
 
-    // Create shared store
+    // ----------------------------------------------------------------
+    // Shared store
+    // ----------------------------------------------------------------
     let shared_store = AppStore::new_shared();
 
-    // Create mpsc channel
+    // Pre-populate with mock data when --mock is passed
+    if cli.mock {
+        let mut store = shared_store.write().await;
+        store.populate_mock_data();
+    }
+
+    // ----------------------------------------------------------------
+    // Event channel
+    // ----------------------------------------------------------------
     let (tx, mut rx) = mpsc::channel(1024);
 
-    // Clone tx before it is moved into the HTTP server task.
-    let tx_jsonl = tx.clone();
-
+    // ----------------------------------------------------------------
     // Spawn HTTP server
-    let bind = cli.bind.clone();
-    let port = cli.port;
-    tokio::spawn(async move {
-        if let Err(e) = collector::http_server::run_http_server(bind, port, tx).await {
-            eprintln!("HTTP server error: {}", e);
-        }
-    });
+    // ----------------------------------------------------------------
+    {
+        let bind_addr = bind.clone();
+        let tx_http = tx.clone();
+        let sd = shutdown.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                result = collector::http_server::run_http_server(bind_addr, port, tx_http) => {
+                    if let Err(e) = result {
+                        // Port already in use or other bind error — log and continue;
+                        // TUI still works via JSONL watcher.
+                        tracing::warn!("HTTP server failed to start: {e}");
+                        eprintln!("Warning: HTTP server could not bind on port {port}: {e}");
+                        eprintln!("  -> TUI will still work via JSONL watcher.");
+                    }
+                }
+                _ = sd.cancelled() => {}
+            }
+        });
+    }
 
-    // Spawn JSONL watcher (fallback data source)
-    if !cli.no_jsonl {
-        let watch_dir = cli.watch_dir.unwrap_or_else(|| {
+    // ----------------------------------------------------------------
+    // Spawn JSONL watcher
+    // ----------------------------------------------------------------
+    if watcher_enabled {
+        let dir = watch_dir.unwrap_or_else(|| {
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("/tmp"))
                 .join(".claude")
                 .join("projects")
         });
+
+        if !dir.exists() {
+            eprintln!(
+                "Warning: JSONL watch directory does not exist: {}",
+                dir.display()
+            );
+            eprintln!("  -> Continuing without JSONL watcher.");
+        } else {
+            let tx_jsonl = tx.clone();
+            let sd = shutdown.clone();
+            tokio::spawn(async move {
+                tokio::select! {
+                    result = collector::jsonl_watcher::run_jsonl_watcher(dir, tx_jsonl) => {
+                        if let Err(e) = result {
+                            tracing::warn!("JSONL watcher error: {e}");
+                            eprintln!("JSONL watcher error: {e}");
+                        }
+                    }
+                    _ = sd.cancelled() => {}
+                }
+            });
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Store updater task
+    // ----------------------------------------------------------------
+    {
+        let store_for_updater = shared_store.clone();
+        let sd = shutdown.clone();
         tokio::spawn(async move {
-            if let Err(e) =
-                collector::jsonl_watcher::run_jsonl_watcher(watch_dir, tx_jsonl).await
-            {
-                eprintln!("JSONL watcher error: {}", e);
+            let mut gc_interval =
+                tokio::time::interval(std::time::Duration::from_secs(10));
+            loop {
+                tokio::select! {
+                    Some(event) = rx.recv() => {
+                        let mut store = store_for_updater.write().await;
+                        store.apply_event(event);
+                    }
+                    _ = gc_interval.tick() => {
+                        let now = Utc::now().timestamp();
+                        let mut store = store_for_updater.write().await;
+                        store.gc_stale_agents(now);
+                    }
+                    _ = sd.cancelled() => break,
+                }
             }
         });
     }
 
-    // Spawn store updater task
-    let store_for_updater = shared_store.clone();
-    tokio::spawn(async move {
-        let mut gc_interval = tokio::time::interval(std::time::Duration::from_secs(10));
-        loop {
-            tokio::select! {
-                Some(event) = rx.recv() => {
-                    let mut store = store_for_updater.write().await;
-                    store.apply_event(event);
-                }
-                _ = gc_interval.tick() => {
-                    let now = Utc::now().timestamp();
-                    let mut store = store_for_updater.write().await;
-                    store.gc_stale_agents(now);
-                }
-            }
-        }
-    });
-
+    // ----------------------------------------------------------------
     // Terminal setup
+    // ----------------------------------------------------------------
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -133,32 +240,58 @@ async fn main() -> Result<()> {
     // Drop guard ensures cleanup even if we return early via ?
     let _guard = TerminalGuard;
 
-    // Create app state
-    let mut app = App::new(cli.port);
+    // ----------------------------------------------------------------
+    // TUI main loop
+    // ----------------------------------------------------------------
+    let mut app = App::new(port);
+    let event_handler = EventHandler::new(tick_rate);
 
-    // Event handler
-    let event_handler = EventHandler::new(cli.tick_rate);
-
-    // Main loop
     while app.running {
-        // Take a snapshot of the store for rendering
         let snap = StoreSnapshot::from_store(&shared_store).await;
-
-        // Update cached counts for scroll bounds
         app.update_counts(snap.agents.len(), snap.feed.len(), snap.sessions.len());
-
         terminal.draw(|f| render::draw(f, &app, &snap))?;
 
         match event_handler.next()? {
             AppEvent::Key(key) => app.handle_key(key),
             AppEvent::Tick => {
-                // Snapshot already taken above
+                app.tick += 1;
+
+                // Initialize stage lazily (needs terminal size)
+                if !app.stage.initialized {
+                    let term_size = terminal.size()?;
+                    let stage_area_height = term_size.height.saturating_sub(5); // tab + status
+                    let stage_area_width = term_size.width;
+                    app.stage
+                        .init(stage_area_width as usize, (stage_area_height as usize) * 2);
+                }
+
+                // Sync agents
+                app.stage.sync_agents(&snap.agents);
+
+                // Spawn big dots for new events with tool usage
+                if snap.feed.len() > app.last_feed_count {
+                    for event in snap.feed.iter().skip(app.last_feed_count) {
+                        if event.tool_name.is_some() {
+                            app.stage.spawn_big_dot(&event.agent_id);
+                        }
+                    }
+                    app.last_feed_count = snap.feed.len();
+                }
+
+                // Advance stage animation
+                app.stage.tick();
             }
             AppEvent::Resize(_, _) => {
-                // Terminal handles resize automatically on next draw
+                app.stage.initialized = false;
             }
         }
     }
+
+    // ----------------------------------------------------------------
+    // Graceful shutdown: signal tasks and give them 500 ms to finish
+    // ----------------------------------------------------------------
+    shutdown.cancel();
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     Ok(())
 }
