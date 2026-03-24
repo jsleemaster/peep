@@ -5,6 +5,7 @@ mod tui;
 
 use std::io;
 use std::panic;
+use std::path::PathBuf;
 
 use anyhow::Result;
 use chrono::Utc;
@@ -36,6 +37,14 @@ struct Cli {
     /// Tick rate in milliseconds
     #[arg(long, default_value_t = 100)]
     tick_rate: u64,
+
+    /// JSONL watch directory (defaults to ~/.claude/projects/)
+    #[arg(long)]
+    watch_dir: Option<PathBuf>,
+
+    /// Disable JSONL watcher
+    #[arg(long)]
+    no_jsonl: bool,
 }
 
 /// Guard that restores terminal on drop (including panics)
@@ -66,6 +75,9 @@ async fn main() -> Result<()> {
     // Create mpsc channel
     let (tx, mut rx) = mpsc::channel(1024);
 
+    // Clone tx before it is moved into the HTTP server task.
+    let tx_jsonl = tx.clone();
+
     // Spawn HTTP server
     let bind = cli.bind.clone();
     let port = cli.port;
@@ -74,6 +86,23 @@ async fn main() -> Result<()> {
             eprintln!("HTTP server error: {}", e);
         }
     });
+
+    // Spawn JSONL watcher (fallback data source)
+    if !cli.no_jsonl {
+        let watch_dir = cli.watch_dir.unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("/tmp"))
+                .join(".claude")
+                .join("projects")
+        });
+        tokio::spawn(async move {
+            if let Err(e) =
+                collector::jsonl_watcher::run_jsonl_watcher(watch_dir, tx_jsonl).await
+            {
+                eprintln!("JSONL watcher error: {}", e);
+            }
+        });
+    }
 
     // Spawn store updater task
     let store_for_updater = shared_store.clone();
