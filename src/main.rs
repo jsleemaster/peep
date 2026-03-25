@@ -260,6 +260,10 @@ async fn main() -> Result<()> {
                     app.stage.initialized = true;
                 }
                 app.stage.tick += 1;
+
+                // Update project list
+                let projects = crate::tui::widgets::stage::get_projects(&snap);
+                app.update_projects(&projects);
             }
             AppEvent::Resize(_, _) => {}
         }

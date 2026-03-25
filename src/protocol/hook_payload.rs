@@ -160,5 +160,7 @@ pub fn parse_hook_payload(body: &Value) -> Option<RawIngestEvent> {
         total_tokens,
         is_error,
         branch_name,
+        slug: None,
+        cwd: None,
     })
 }

@@ -61,6 +61,10 @@ pub struct App {
     pub tick: usize,
     #[allow(dead_code)]
     pub last_feed_count: usize,
+
+    // Project selection (cwd-based)
+    pub current_project: Option<String>,  // selected cwd, None = all
+    pub project_index: usize,             // index into project list
 }
 
 impl App {
@@ -84,6 +88,8 @@ impl App {
             stage: StageState::new(),
             tick: 0,
             last_feed_count: 0,
+            current_project: None,
+            project_index: 0,
         }
     }
 
@@ -171,6 +177,10 @@ impl App {
                 self.show_filter = true;
                 self.filter_text.clear();
             }
+
+            // Project cycling
+            KeyCode::Char('[') => self.prev_project(),
+            KeyCode::Char(']') => self.next_project(),
 
             _ => {}
         }
@@ -287,5 +297,36 @@ impl App {
                 }
             },
         }
+    }
+
+    /// Update current_project based on available projects from agents
+    pub fn update_projects(&mut self, projects: &[String]) {
+        if projects.is_empty() {
+            self.current_project = None;
+            self.project_index = 0;
+            return;
+        }
+        // Auto-select first project if none selected
+        if self.current_project.is_none() && !projects.is_empty() {
+            self.project_index = 0;
+            self.current_project = Some(projects[0].clone());
+        }
+        // Ensure index is valid
+        if self.project_index >= projects.len() {
+            self.project_index = 0;
+            self.current_project = projects.first().cloned();
+        }
+    }
+
+    fn next_project(&mut self) {
+        // Will be applied on next update_projects call
+        self.project_index = self.project_index.wrapping_add(1);
+        // Actual project switch happens in update_projects
+        self.current_project = None; // force re-resolve
+    }
+
+    fn prev_project(&mut self) {
+        self.project_index = self.project_index.wrapping_sub(1);
+        self.current_project = None;
     }
 }

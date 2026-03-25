@@ -23,8 +23,11 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
         .unwrap_or("unknown")
         .to_string();
 
-    // Use slug as display name if available, otherwise session_id prefix
-    let _slug = v.get("slug").and_then(|s| s.as_str()).map(str::to_string);
+    // Slug for display name
+    let slug = v.get("slug").and_then(|s| s.as_str()).map(str::to_string);
+
+    // Working directory for project grouping
+    let cwd = v.get("cwd").and_then(|s| s.as_str()).map(str::to_string);
 
     // Git branch
     let branch_name = v
@@ -93,6 +96,8 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                             total_tokens: None,
                             is_error: false,
                             branch_name,
+                            slug: slug.clone(),
+                            cwd: cwd.clone(),
                         });
                     }
                 }
@@ -120,6 +125,8 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                             total_tokens: None,
                             is_error: false,
                             branch_name,
+                            slug: slug.clone(),
+                            cwd: cwd.clone(),
                         });
                     }
                 }
@@ -158,12 +165,14 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                             ts,
                             event_type: RuntimeEventType::ToolDone,
                             hook_event_name: Some("PostToolUse".into()),
-                            tool_name: None, // tool_result doesn't repeat the name
+                            tool_name: None,
                             file_path: None,
                             detail,
                             total_tokens: None,
                             is_error,
                             branch_name,
+                            slug: slug.clone(),
+                            cwd: cwd.clone(),
                         });
                     }
                 }
@@ -182,6 +191,8 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                     total_tokens: None,
                     is_error: false,
                     branch_name,
+                    slug: slug.clone(),
+                    cwd: cwd.clone(),
                 })
             } else {
                 None
@@ -211,6 +222,8 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
             total_tokens: None,
             is_error: false,
             branch_name,
+            slug: slug.clone(),
+            cwd: cwd.clone(),
         }),
 
         // Legacy format: tool_result at top level
@@ -238,6 +251,8 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                 total_tokens: None,
                 is_error,
                 branch_name,
+                slug: slug.clone(),
+                cwd: cwd.clone(),
             })
         }
 

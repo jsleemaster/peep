@@ -19,6 +19,42 @@ const BUBBLE_BG: Color = Color::Rgb(32, 32, 48);
 const BUBBLE_BORDER: Color = Color::Rgb(55, 55, 75);
 const BG: Color = Color::Rgb(18, 18, 28);
 
+/// Get unique project names from agents
+pub fn get_projects(snap: &StoreSnapshot) -> Vec<String> {
+    let mut projects: Vec<String> = snap
+        .agents
+        .iter()
+        .filter_map(|a| a.cwd.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    projects.sort();
+    projects
+}
+
+/// Shorten cwd to project name (last path component)
+fn short_project_name(cwd: &str) -> &str {
+    cwd.rsplit('/').next().unwrap_or(cwd)
+}
+
+/// Filter snapshot to only include agents/events for the current project
+fn filter_snap_by_project<'a>(
+    snap: &'a StoreSnapshot,
+    project: &Option<String>,
+) -> (Vec<&'a crate::protocol::types::Agent>, Vec<&'a FeedEvent>) {
+    match project {
+        Some(cwd) => {
+            let agents: Vec<_> = snap.agents.iter().filter(|a| a.cwd.as_deref() == Some(cwd)).collect();
+            let agent_ids: std::collections::HashSet<_> = agents.iter().map(|a| &a.agent_id).collect();
+            let feed: Vec<_> = snap.feed.iter().filter(|e| agent_ids.contains(&e.agent_id)).collect();
+            (agents, feed)
+        }
+        None => {
+            (snap.agents.iter().collect(), snap.feed.iter().collect())
+        }
+    }
+}
+
 pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
     // Fill background
     f.render_widget(
@@ -31,11 +67,47 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) 
         return;
     }
 
+    // Project tabs + main content
+    let projects = get_projects(snap);
+    let has_projects = projects.len() > 1;
+
+    let chunks = if has_projects {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Fill(1)])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(0), Constraint::Fill(1)])
+            .split(area)
+    };
+
+    // Render project tabs
+    if has_projects {
+        let mut tab_spans = vec![Span::styled(" ", Style::default().bg(BG))];
+        for (i, proj) in projects.iter().enumerate() {
+            let name = short_project_name(proj);
+            let is_selected = app.current_project.as_deref() == Some(proj);
+            let style = if is_selected {
+                Style::default().fg(Color::Rgb(255, 220, 80)).bg(Color::Rgb(50, 45, 30)).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(DIM).bg(BG)
+            };
+            tab_spans.push(Span::styled(format!(" {} ", name), style));
+            if i < projects.len() - 1 {
+                tab_spans.push(Span::styled(" \u{2502} ", Style::default().fg(Color::Rgb(40, 40, 55)).bg(BG)));
+            }
+        }
+        tab_spans.push(Span::styled("  [/] switch", Style::default().fg(Color::Rgb(40, 40, 55)).bg(BG)));
+        f.render_widget(Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(BG)), chunks[0]);
+    }
+
     // Main: left (leader + party) | right (feed)
     let main = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(44), Constraint::Fill(1)])
-        .split(area);
+        .split(chunks[1]);
 
     render_left_panel(f, main[0], app, snap);
     render_right_panel(f, main[1], app, snap);
@@ -89,12 +161,14 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     let li = left_block.inner(area);
     f.render_widget(left_block, area);
 
+    // Filter by project
+    let (proj_agents, _proj_feed) = filter_snap_by_project(snap, &app.current_project);
+
     // Find the leader (AgentRole::Main or first agent)
-    let leader = snap
-        .agents
+    let leader = proj_agents
         .iter()
         .find(|a| a.role == AgentRole::Main)
-        .or_else(|| snap.agents.first());
+        .or_else(|| proj_agents.first());
 
     let leader = match leader {
         Some(l) => l,
@@ -280,10 +354,10 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     }
 
     // Party separator
-    let party_members: Vec<_> = snap
-        .agents
+    let party_members: Vec<_> = proj_agents
         .iter()
         .filter(|a| a.agent_id != leader.agent_id)
+        .copied()
         .collect();
 
     y += 1;
@@ -395,13 +469,30 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             );
         }
 
-        // State / tool info
+        // State / tool + mini speech bubble
         let state_y = name_y + 1;
         if state_y < li.y + li.height {
-            let st = member
-                .current_skill
-                .map(|s| format!("{}", s))
-                .unwrap_or_else(|| format!("{}", member.state));
+            // Find latest activity for this member
+            let latest_text = snap
+                .feed
+                .iter()
+                .rev()
+                .find(|e| e.agent_id == member.agent_id && e.detail.is_some())
+                .and_then(|e| e.detail.as_deref());
+
+            let display_text = if let Some(tool) = &member.current_skill {
+                format!("{}", tool)
+            } else if let Some(text) = latest_text {
+                let chars: Vec<char> = text.chars().collect();
+                if chars.len() > (col_w as usize).saturating_sub(2) {
+                    chars[..(col_w as usize).saturating_sub(5)].iter().collect::<String>() + "..."
+                } else {
+                    text.to_string()
+                }
+            } else {
+                format!("{}", member.state)
+            };
+
             let sc = if is_done {
                 DIM
             } else if is_waiting {
@@ -411,7 +502,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             };
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(
-                    format!("{:^width$}", st, width = col_w as usize),
+                    format!("{:^width$}", display_text, width = col_w as usize),
                     Style::default().fg(sc),
                 )))
                 .style(Style::default().bg(CARD_BG)),
@@ -422,16 +513,19 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
 }
 
 fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
+    // Create a project-filtered view for feeds
+    let (_proj_agents, proj_feed) = filter_snap_by_project(snap, &app.current_project);
+
     let feed_cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(area);
 
-    render_commands_panel(f, feed_cols[0], app, snap);
-    render_thinking_panel(f, feed_cols[1], app, snap);
+    render_commands_panel(f, feed_cols[0], app, snap, &proj_feed);
+    render_thinking_panel(f, feed_cols[1], app, snap, &proj_feed);
 }
 
-fn render_commands_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
+fn render_commands_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot, proj_feed: &[&FeedEvent]) {
     let cmd_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Rgb(35, 35, 50)))
@@ -445,8 +539,7 @@ fn render_commands_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnaps
 
     // Filter for tool events with actual tool names (skip empty ToolDone)
     let filter = &app.filter_text;
-    let cmd_events: Vec<&FeedEvent> = snap
-        .feed
+    let cmd_events: Vec<&&FeedEvent> = proj_feed
         .iter()
         .filter(|e| {
             e.tool_name.is_some()
@@ -504,7 +597,7 @@ fn render_commands_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnaps
     f.render_widget(Paragraph::new(cmd_lines).block(cmd_block), area);
 }
 
-fn render_thinking_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
+fn render_thinking_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot, proj_feed: &[&FeedEvent]) {
     let thought_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Rgb(35, 35, 50)))
@@ -517,8 +610,7 @@ fn render_thinking_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnaps
         .style(Style::default().bg(CARD_BG));
 
     let filter = &app.filter_text;
-    let text_events: Vec<&FeedEvent> = snap
-        .feed
+    let text_events: Vec<&&FeedEvent> = proj_feed
         .iter()
         .filter(|e| e.event_type == RuntimeEventType::AssistantText)
         .filter(|e| {
@@ -638,8 +730,9 @@ fn format_tool(e: &FeedEvent) -> String {
     if path.is_empty() {
         tool.to_string()
     } else {
-        // Shorten path to last component
-        let short_path = path.rsplit('/').next().unwrap_or(path);
+        // Show last 2-3 path components for context
+        let parts: Vec<&str> = path.rsplit('/').take(3).collect();
+        let short_path: String = parts.into_iter().rev().collect::<Vec<_>>().join("/");
         format!("{} {}", tool, short_path)
     }
 }

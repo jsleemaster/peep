@@ -31,7 +31,7 @@ const EGG_SHADOW: Color = Color::Rgb(200, 195, 180);
 const EGG_CRACK: Color = Color::Rgb(180, 170, 150);
 
 /// Mother hen (leader) - 14x14 pixels
-/// Fixed proportions: head 4 rows, body 6 rows, legs 2 rows (+ 2 rows comb)
+/// Proportions: 1 comb + 3 head + 8 body + 2 legs = 14
 pub fn chicken_idle(frame: usize) -> Vec<Vec<Pixel>> {
     let w = Some(WHITE);
     let c = Some(CREAM);
@@ -49,29 +49,22 @@ pub fn chicken_idle(frame: usize) -> Vec<Vec<Pixel>> {
     let blink = frame % 20 < 2;
     let eye = if blink { w } else { e };
 
-    // 14 rows: 2 comb + 4 head + 6 body + 2 legs
     vec![
-        //-- comb (2 rows)
-        vec![n, n, n, n, co, co, co, n, n, n, n, n, n, n],
-        vec![n, n, n, co, cd, co, cd, co, n, n, n, n, n, n],
-        //-- head (4 rows)
+        //-- comb (1 row)
+        vec![n, n, n, n, co, cd, co, n, n, n, n, n, n, n],
+        //-- head (3 rows) - compact
         vec![n, n, n, w, w, w, w, w, n, n, n, n, n, n],
-        vec![
-            n, n, w, w, eye, w, w, w, w, b, n, n, n, n,
-        ],
-        vec![n, n, w, w, w, w, w, w, b, bd, n, n, n, n],
-        vec![n, n, w, w, w, w, w, w, w, n, n, n, n, n],
-        //-- body (6 rows)
-        vec![n, w, w, w, w, w, w, w, w, w, n, n, n, n],
-        vec![n, w, wi, wi, w, c, c, w, w, w, w, n, n, n],
-        vec![
-            n, w, wd, wi, wi, c, c, c, w, w, w, w, n, n,
-        ],
-        vec![
-            n, n, w, wd, wi, w, w, w, w, w, w, w, n, n,
-        ],
-        vec![n, n, n, w, w, w, c, c, w, w, w, n, n, n],
-        vec![n, n, n, n, w, w, w, w, w, w, n, n, n, n],
+        vec![n, n, w, w, eye, w, w, w, b, bd, n, n, n, n],
+        vec![n, n, n, w, w, w, w, w, n, n, n, n, n, n],
+        //-- body (8 rows) - wide and round
+        vec![n, n, w, w, w, w, w, w, w, w, n, n, n, n],
+        vec![n, w, w, w, w, w, w, w, w, w, w, n, n, n],
+        vec![n, w, wi, wi, w, c, c, w, w, w, w, w, n, n],
+        vec![w, w, wd, wi, wi, c, c, c, w, w, w, w, w, n],
+        vec![w, w, w, wd, wi, w, w, w, w, w, w, w, w, n],
+        vec![n, w, w, w, w, w, c, c, w, w, w, w, n, n],
+        vec![n, n, w, w, w, w, w, w, w, w, w, n, n, n],
+        vec![n, n, n, w, w, w, w, w, w, w, n, n, n, n],
         //-- legs (2 rows)
         vec![n, n, n, n, n, f, fd, n, f, fd, n, n, n, n],
         vec![n, n, n, n, f, f, n, f, f, f, n, n, n, n],
@@ -94,24 +87,24 @@ pub fn chicken_peck(frame: usize) -> Vec<Vec<Pixel>> {
     let n = n();
 
     if frame % 4 < 2 {
-        // Head down pecking - head shifted down by 1
+        // Head dips down (beak closer to ground)
         vec![
+            //-- no comb visible (head lowered)
             vec![n, n, n, n, n, n, n, n, n, n, n, n, n, n],
-            vec![n, n, n, n, co, co, co, n, n, n, n, n, n, n],
-            vec![n, n, n, n, cd, co, cd, n, n, n, n, n, n, n],
-            vec![n, n, n, w, w, w, w, w, n, n, n, n, n, n],
+            //-- head lowered (3 rows)
+            vec![n, n, n, n, co, cd, co, n, n, n, n, n, n, n],
             vec![n, n, n, w, w, e, w, w, b, b, n, n, n, n],
             vec![n, n, n, w, w, w, w, w, bd, n, n, n, n, n],
-            vec![n, w, w, w, w, w, w, w, w, w, n, n, n, n],
-            vec![n, w, wi, wi, w, c, c, w, w, w, w, n, n, n],
-            vec![
-                n, w, wd, wi, wi, c, c, c, w, w, w, w, n, n,
-            ],
-            vec![
-                n, n, w, wd, wi, w, w, w, w, w, w, w, n, n,
-            ],
-            vec![n, n, n, w, w, w, c, c, w, w, w, n, n, n],
-            vec![n, n, n, n, w, w, w, w, w, w, n, n, n, n],
+            //-- body (8 rows)
+            vec![n, n, w, w, w, w, w, w, w, w, n, n, n, n],
+            vec![n, w, w, w, w, w, w, w, w, w, w, n, n, n],
+            vec![n, w, wi, wi, w, c, c, w, w, w, w, w, n, n],
+            vec![w, w, wd, wi, wi, c, c, c, w, w, w, w, w, n],
+            vec![w, w, w, wd, wi, w, w, w, w, w, w, w, w, n],
+            vec![n, w, w, w, w, w, c, c, w, w, w, w, n, n],
+            vec![n, n, w, w, w, w, w, w, w, w, w, n, n, n],
+            vec![n, n, n, w, w, w, w, w, w, w, n, n, n, n],
+            //-- legs (2 rows)
             vec![n, n, n, n, n, f, fd, n, f, fd, n, n, n, n],
             vec![n, n, n, n, f, f, n, f, f, f, n, n, n, n],
         ]

@@ -55,9 +55,11 @@ impl AppStore {
 
         // Upsert agent
         let agent = self.agents.entry(agent_id.clone()).or_insert_with(|| {
+            // Prefer slug > session_runtime_id > short_id for display name
             let display_name = raw
-                .session_runtime_id
+                .slug
                 .clone()
+                .or_else(|| raw.session_runtime_id.clone())
                 .unwrap_or_else(|| short_id.clone());
             Agent {
                 agent_id: agent_id.clone(),
@@ -75,6 +77,7 @@ impl AppStore {
                 context_percent: None,
                 cost_usd: None,
                 model_name: None,
+                cwd: raw.cwd.clone(),
             }
         });
 
@@ -220,14 +223,14 @@ impl AppStore {
         // ----------------------------------------------------------------
         // Agents
         // ----------------------------------------------------------------
-        let agents_raw: &[(&str, &str, AgentState, AgentRole, Option<f64>)] = &[
-            ("main-worker-0001abcd", "main-worker",  AgentState::Active,    AgentRole::Main,     Some(67.0)),
-            ("team-review-0002efgh", "team-review",  AgentState::Waiting,   AgentRole::Team,     Some(22.0)),
-            ("sub-scout-0003ijkl",   "sub-scout",    AgentState::Completed, AgentRole::Subagent, None),
-            ("team-builder-0004mnop","team-builder", AgentState::Active,    AgentRole::Team,     Some(45.0)),
+        let agents_raw: &[(&str, &str, AgentState, AgentRole, Option<f64>, &str)] = &[
+            ("main-worker-0001abcd", "main-worker",  AgentState::Active,    AgentRole::Main,     Some(67.0), "/Users/leeo/evar/platform"),
+            ("team-review-0002efgh", "team-review",  AgentState::Waiting,   AgentRole::Team,     Some(22.0), "/Users/leeo/evar/platform"),
+            ("sub-scout-0003ijkl",   "sub-scout",    AgentState::Completed, AgentRole::Subagent, None,       "/Users/leeo/packmen-tui"),
+            ("team-builder-0004mnop","team-builder", AgentState::Active,    AgentRole::Team,     Some(45.0), "/Users/leeo/bill-pr"),
         ];
 
-        for (id, name, state, role, ctx) in agents_raw {
+        for (id, name, state, role, ctx, cwd) in agents_raw {
             let mut skill_usage = HashMap::new();
             skill_usage.insert(SkillKind::Read,   12u64);
             skill_usage.insert(SkillKind::Edit,    5);
@@ -252,6 +255,7 @@ impl AppStore {
                     context_percent: *ctx,
                     cost_usd:      Some(0.12),
                     model_name:    Some("claude-sonnet-4-5".to_string()),
+                    cwd:           Some(cwd.to_string()),
                 },
             );
         }
