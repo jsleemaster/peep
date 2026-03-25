@@ -91,7 +91,7 @@ impl AppStore {
         }
 
         if let Some(tokens) = raw.total_tokens {
-            agent.total_tokens = tokens; // cumulative from Claude Code
+            agent.total_tokens += tokens; // accumulate from each event
         }
 
         if let Some(s) = skill {

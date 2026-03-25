@@ -44,6 +44,18 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
         .map(|dt| dt.timestamp())
         .unwrap_or_else(|| chrono::Utc::now().timestamp());
 
+    // Extract token usage from assistant messages: message.usage
+    let total_tokens = v
+        .get("message")
+        .and_then(|m| m.get("usage"))
+        .and_then(|u| {
+            let input = u.get("input_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
+            let output = u.get("output_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
+            let cache = u.get("cache_read_input_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
+            let total = input + output + cache;
+            if total > 0 { Some(total) } else { None }
+        });
+
     match entry_type {
         // assistant message — may contain tool_use blocks or plain text
         "assistant" => {
@@ -93,7 +105,7 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                             tool_name,
                             file_path,
                             detail,
-                            total_tokens: None,
+                            total_tokens,
                             is_error: false,
                             branch_name,
                             slug: slug.clone(),
@@ -106,7 +118,6 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                 for block in blocks {
                     if block.get("type").and_then(|t| t.as_str()) == Some("text") {
                         let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
-                        // Skip very short or empty text
                         if text.len() < 3 {
                             return None;
                         }
@@ -122,7 +133,7 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                             tool_name: None,
                             file_path: None,
                             detail,
-                            total_tokens: None,
+                            total_tokens,
                             is_error: false,
                             branch_name,
                             slug: slug.clone(),
