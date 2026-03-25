@@ -5,6 +5,8 @@ use tokio::sync::RwLock;
 use crate::protocol::normalize::tool_name_to_skill;
 use crate::protocol::types::*;
 
+use chrono::Utc;
+
 const FEED_LIMIT: usize = 1000;
 const STALE_AGENT_MS: i64 = 300_000; // 5 minutes
 
@@ -209,6 +211,133 @@ impl AppStore {
                 .then(b.last_event_ts.cmp(&a.last_event_ts))
         });
         agents
+    }
+
+    /// Populate the store with synthetic demo data for `--mock` mode.
+    pub fn populate_mock_data(&mut self) {
+        let now = Utc::now().timestamp();
+
+        // ----------------------------------------------------------------
+        // Agents
+        // ----------------------------------------------------------------
+        let agents_raw: &[(&str, &str, AgentState, AgentRole, Option<f64>)] = &[
+            ("main-worker-0001abcd", "main-worker",  AgentState::Active,    AgentRole::Main,     Some(67.0)),
+            ("team-review-0002efgh", "team-review",  AgentState::Waiting,   AgentRole::Team,     Some(22.0)),
+            ("sub-scout-0003ijkl",   "sub-scout",    AgentState::Completed, AgentRole::Subagent, None),
+            ("team-builder-0004mnop","team-builder", AgentState::Active,    AgentRole::Team,     Some(45.0)),
+        ];
+
+        for (id, name, state, role, ctx) in agents_raw {
+            let mut skill_usage = HashMap::new();
+            skill_usage.insert(SkillKind::Read,   12u64);
+            skill_usage.insert(SkillKind::Edit,    5);
+            skill_usage.insert(SkillKind::Bash,    8);
+            skill_usage.insert(SkillKind::Search,  3);
+
+            self.agents.insert(
+                id.to_string(),
+                Agent {
+                    agent_id:      id.to_string(),
+                    display_name:  name.to_string(),
+                    short_id:      id[..8].to_string(),
+                    state:         *state,
+                    role:          *role,
+                    current_skill: if *state == AgentState::Active { Some(SkillKind::Edit) } else { None },
+                    branch_name:   Some(format!("feat/{name}")),
+                    skill_usage,
+                    total_tokens:  42_000,
+                    usage_count:   28,
+                    tool_run_count: 28,
+                    last_event_ts: now - 30,
+                    context_percent: *ctx,
+                    cost_usd:      Some(0.12),
+                    model_name:    Some("claude-sonnet-4-5".to_string()),
+                },
+            );
+        }
+
+        // ----------------------------------------------------------------
+        // Feed events (~20)
+        // ----------------------------------------------------------------
+        let feed_entries: &[(&str, RuntimeEventType, Option<&str>, Option<&str>)] = &[
+            ("main-worker-0001abcd",  RuntimeEventType::ToolStart,    Some("Read"),  Some("src/main.rs")),
+            ("main-worker-0001abcd",  RuntimeEventType::ToolDone,     Some("Read"),  Some("src/main.rs")),
+            ("team-review-0002efgh",  RuntimeEventType::TurnActive,   None,          None),
+            ("main-worker-0001abcd",  RuntimeEventType::ToolStart,    Some("Edit"),  Some("src/store/state.rs")),
+            ("sub-scout-0003ijkl",    RuntimeEventType::ToolStart,    Some("Bash"),  Some("cargo build")),
+            ("team-builder-0004mnop", RuntimeEventType::TurnActive,   None,          None),
+            ("main-worker-0001abcd",  RuntimeEventType::ToolDone,     Some("Edit"),  Some("src/store/state.rs")),
+            ("team-review-0002efgh",  RuntimeEventType::PermissionWait, None,        Some("waiting for user")),
+            ("sub-scout-0003ijkl",    RuntimeEventType::ToolDone,     Some("Bash"),  None),
+            ("team-builder-0004mnop", RuntimeEventType::ToolStart,    Some("Search"), Some("Cargo.toml")),
+            ("main-worker-0001abcd",  RuntimeEventType::AssistantText, None,         None),
+            ("team-builder-0004mnop", RuntimeEventType::ToolDone,     Some("Search"), None),
+            ("sub-scout-0003ijkl",    RuntimeEventType::TurnWaiting,  None,          None),
+            ("main-worker-0001abcd",  RuntimeEventType::ToolStart,    Some("Bash"),  Some("cargo clippy")),
+            ("team-review-0002efgh",  RuntimeEventType::AssistantText, None,         None),
+            ("main-worker-0001abcd",  RuntimeEventType::ToolDone,     Some("Bash"),  None),
+            ("team-builder-0004mnop", RuntimeEventType::ToolStart,    Some("Read"),  Some("README.md")),
+            ("main-worker-0001abcd",  RuntimeEventType::ToolStart,    Some("Write"), Some("src/config.rs")),
+            ("team-builder-0004mnop", RuntimeEventType::ToolDone,     Some("Read"),  None),
+            ("main-worker-0001abcd",  RuntimeEventType::ToolDone,     Some("Write"), None),
+        ];
+
+        for (i, (agent_id, event_type, tool_name, file_path)) in feed_entries.iter().enumerate() {
+            let skill = tool_name.map(|t| tool_name_to_skill(t));
+            // Compute display_name from agent_id stored in agents map
+            let (display_name, short_id) = self
+                .agents
+                .get(*agent_id)
+                .map(|a| (a.display_name.clone(), a.short_id.clone()))
+                .unwrap_or_else(|| (agent_id[..8].to_string(), agent_id[..8].to_string()));
+
+            let ev = FeedEvent {
+                id: uuid::Uuid::new_v4().to_string(),
+                ts: now - (feed_entries.len() as i64 - i as i64) * 3,
+                agent_id: agent_id.to_string(),
+                display_name,
+                short_id,
+                skill,
+                event_type: *event_type,
+                tool_name: tool_name.map(|s| s.to_string()),
+                file_path: file_path.map(|s| s.to_string()),
+                detail: None,
+                total_tokens: Some(42_000),
+                is_error: false,
+                ingest_source: IngestSource::Http,
+            };
+            self.feed.push_back(ev);
+        }
+
+        // ----------------------------------------------------------------
+        // Completed sessions (3)
+        // ----------------------------------------------------------------
+        let sessions_raw: &[(&str, AgentRole, u64, u64)] = &[
+            ("session-alpha",   AgentRole::Main,     3_600_000, 84_000),
+            ("session-beta",    AgentRole::Team,     1_200_000, 31_000),
+            ("session-gamma",   AgentRole::Subagent,   900_000, 18_500),
+        ];
+
+        for (session_id, role, duration_ms, tokens) in sessions_raw {
+            self.sessions.push(Session {
+                session_id:    session_id.to_string(),
+                display_name:  session_id.to_string(),
+                role:          *role,
+                started_at:    now - (*duration_ms as i64 / 1000) - 600,
+                ended_at:      now - 600,
+                duration_ms:   *duration_ms,
+                event_count:   55,
+                tool_run_count: 42,
+                total_tokens:  *tokens,
+                cost_usd:      Some(0.08),
+                close_reason:  SessionCloseReason::WorkFinished,
+            });
+        }
+
+        // Activity timestamps for sparkline
+        for i in 0..20i64 {
+            self.activity_timestamps.push_back(now - i * 10);
+        }
     }
 
     pub fn format_tokens(tokens: u64) -> String {

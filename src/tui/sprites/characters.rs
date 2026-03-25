@@ -15,60 +15,52 @@ const PALETTE: [(Color, Color); 8] = [
     (Color::Rgb(255, 255, 150), Color::Rgb(200, 200, 100)), // cream
 ];
 
-/// 7x8 mini Pac-Man with mouth open (facing right).
+/// 5x6 mini Pac-Man with mouth open (facing right).
 /// 0=transparent, 1=body, 2=dark, 3=eye_white, 4=eye_pupil
 pub fn mini_packman_open() -> Vec<Vec<u8>> {
     vec![
-        vec![0, 0, 1, 1, 1, 0, 0], // row 0
-        vec![0, 1, 1, 1, 1, 1, 0], // row 1
-        vec![0, 1, 3, 4, 1, 1, 0], // row 2  (eye)
-        vec![0, 1, 1, 1, 1, 0, 0], // row 3  (mouth open)
-        vec![0, 1, 1, 1, 0, 0, 0], // row 4
-        vec![0, 1, 1, 1, 1, 0, 0], // row 5
-        vec![0, 1, 1, 1, 1, 1, 0], // row 6
-        vec![0, 0, 1, 1, 1, 0, 0], // row 7
+        vec![0, 1, 1, 1, 0], // row 0
+        vec![1, 3, 4, 1, 0], // row 1 (eye)
+        vec![1, 1, 1, 0, 0], // row 2 (mouth open)
+        vec![1, 1, 1, 0, 0], // row 3
+        vec![1, 1, 1, 1, 0], // row 4
+        vec![0, 1, 1, 1, 0], // row 5
     ]
 }
 
-/// 7x8 mini Pac-Man with mouth closed.
+/// 5x6 mini Pac-Man with mouth closed.
 pub fn mini_packman_closed() -> Vec<Vec<u8>> {
     vec![
-        vec![0, 0, 1, 1, 1, 0, 0],
-        vec![0, 1, 1, 1, 1, 1, 0],
-        vec![0, 1, 3, 4, 1, 1, 0],
-        vec![0, 1, 1, 1, 1, 1, 0],
-        vec![0, 2, 2, 2, 2, 2, 0],
-        vec![0, 1, 1, 1, 1, 1, 0],
-        vec![0, 1, 1, 1, 1, 1, 0],
-        vec![0, 0, 1, 1, 1, 0, 0],
+        vec![0, 1, 1, 1, 0],
+        vec![1, 3, 4, 1, 1],
+        vec![1, 1, 1, 1, 1],
+        vec![1, 2, 2, 2, 1],
+        vec![1, 1, 1, 1, 1],
+        vec![0, 1, 1, 1, 0],
     ]
 }
 
-/// 7x8 mini ghost shape.
+/// 5x6 mini ghost shape.
 pub fn mini_ghost() -> Vec<Vec<u8>> {
     vec![
-        vec![0, 0, 1, 1, 1, 0, 0],
-        vec![0, 1, 1, 1, 1, 1, 0],
-        vec![0, 3, 4, 1, 3, 4, 0],
-        vec![0, 1, 1, 1, 1, 1, 0],
-        vec![0, 1, 1, 1, 1, 1, 0],
-        vec![0, 1, 1, 1, 1, 1, 0],
-        vec![0, 1, 0, 1, 0, 1, 0],
-        vec![1, 0, 0, 1, 0, 0, 1],
+        vec![0, 1, 1, 1, 0],
+        vec![1, 3, 4, 3, 4],
+        vec![1, 1, 1, 1, 1],
+        vec![1, 1, 1, 1, 1],
+        vec![1, 1, 1, 1, 1],
+        vec![1, 0, 1, 0, 1],
     ]
 }
 
-/// 7x8 done state (circle with checkmark).
+/// 5x6 done state (circle with checkmark).
 pub fn mini_done() -> Vec<Vec<u8>> {
     vec![
-        vec![0, 0, 1, 1, 1, 0, 0],
-        vec![0, 1, 1, 1, 1, 1, 0],
-        vec![0, 1, 1, 1, 1, 3, 0],
-        vec![0, 1, 1, 1, 3, 1, 0],
-        vec![0, 3, 1, 3, 1, 1, 0],
-        vec![0, 1, 3, 1, 1, 1, 0],
-        vec![0, 1, 1, 1, 1, 1, 0],
-        vec![0, 0, 1, 1, 1, 0, 0],
+        vec![0, 1, 1, 1, 0],
+        vec![1, 1, 1, 3, 1],
+        vec![1, 1, 3, 1, 1],
+        vec![3, 1, 1, 1, 1],
+        vec![1, 3, 1, 1, 1],
+        vec![0, 1, 1, 1, 0],
     ]
 }
 
@@ -108,10 +100,18 @@ pub fn flip_h(sprite: &[Vec<Option<Color>>]) -> Vec<Vec<Option<Color>>> {
 }
 
 /// Deterministic color selection based on agent_id hash.
+/// The first palette entry (classic yellow) is index 0.
+/// Uses agent_id hash to pick from palette, but spreads across all colors.
 pub fn agent_colors(agent_id: &str) -> (Color, Color) {
     let hash: u64 = agent_id
         .bytes()
         .fold(5381u64, |h, b| h.wrapping_mul(33).wrapping_add(b as u64));
+    // Start from index 0 so first agents tend to get the first colors
     let idx = (hash as usize) % PALETTE.len();
     PALETTE[idx]
+}
+
+/// Get color for agent by index (0 = classic yellow packman).
+pub fn agent_colors_by_index(index: usize) -> (Color, Color) {
+    PALETTE[index % PALETTE.len()]
 }

@@ -3,8 +3,8 @@ use std::collections::VecDeque;
 
 use super::renderer::PixelCanvas;
 
-const WALL_COLOR: Color = Color::Rgb(33, 33, 222);
-const WALL_COLOR_DARK: Color = Color::Rgb(28, 28, 200);
+const WALL_COLOR: Color = Color::Rgb(55, 40, 80);
+const WALL_COLOR_DARK: Color = Color::Rgb(40, 30, 65);
 
 /// A procedurally generated maze for the Pac-Man stage.
 pub struct Maze {
@@ -21,9 +21,9 @@ pub struct Maze {
 impl Maze {
     /// Generate a maze that fits within the given pixel dimensions.
     pub fn generate(pixel_width: usize, pixel_height: usize) -> Self {
-        // Target ~10 cols x 5 rows, compute cell sizes
-        let cols = 10.max(pixel_width / 10).min(16);
-        let rows = 5.max(pixel_height / 10).min(10);
+        // Target cell size ~8px so characters (5x6) fill corridors nicely
+        let cols = (pixel_width / 8).clamp(6, 24);
+        let rows = (pixel_height / 8).clamp(4, 16);
         let cell_w = pixel_width / cols;
         let cell_h = pixel_height / rows;
 

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyEvent};
+use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 
 #[allow(dead_code)]
 pub enum AppEvent {
@@ -24,7 +24,8 @@ impl EventHandler {
     pub fn next(&self) -> Result<AppEvent> {
         if event::poll(self.tick_rate)? {
             match event::read()? {
-                Event::Key(key) => Ok(AppEvent::Key(key)),
+                Event::Key(key) if key.kind == KeyEventKind::Press => Ok(AppEvent::Key(key)),
+                Event::Key(_) => Ok(AppEvent::Tick), // ignore Release/Repeat
                 Event::Resize(w, h) => Ok(AppEvent::Resize(w, h)),
                 _ => Ok(AppEvent::Tick),
             }
