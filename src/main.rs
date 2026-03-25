@@ -60,6 +60,10 @@ struct Cli {
     /// Write tracing logs to this file path
     #[arg(long)]
     log_file: Option<PathBuf>,
+
+    /// Color theme: dark, light, or auto (default: auto)
+    #[arg(long, default_value = "auto")]
+    theme: String,
 }
 
 /// Guard that restores terminal on drop (including panics)
@@ -83,6 +87,14 @@ async fn main() -> Result<()> {
         eprintln!("Warning: failed to load config file: {e}");
         Config::default()
     });
+
+    // Initialize theme
+    let theme = match cli.theme.as_str() {
+        "dark" => crate::tui::theme::Theme::dark(),
+        "light" => crate::tui::theme::Theme::light(),
+        _ => crate::tui::theme::Theme::auto_detect(),
+    };
+    crate::tui::theme::init_theme(theme);
 
     // CLI args override config file values
     let port = cli.port.unwrap_or(cfg.server.port);

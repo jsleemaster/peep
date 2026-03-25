@@ -2,4 +2,5 @@ pub mod app;
 pub mod event;
 pub mod render;
 pub mod sprites;
+pub mod theme;
 pub mod widgets;

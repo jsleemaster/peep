@@ -6,10 +6,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::protocol::types::*;
-use crate::store::state::AppStore;
+use crate::protocol::types::{Agent, FeedEvent, Session};
 use crate::tui::app::App;
-use crate::tui::widgets::{agent_detail, stage, status_bar, tab_bar};
+use crate::tui::widgets::{agent_detail, stage, tab_bar};
 
 /// A snapshot of the store for rendering (avoids holding the lock during draw).
 pub struct StoreSnapshot {
@@ -42,11 +41,11 @@ impl StoreSnapshot {
 pub fn draw(f: &mut Frame, app: &App, snap: &StoreSnapshot) {
     let size = f.area();
 
-    // Main layout: header (2) | body (fill)
+    // Main layout: header (3) | body (fill)
     let outer_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
+            Constraint::Length(3),
             Constraint::Fill(1),
         ])
         .split(size);

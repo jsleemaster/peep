@@ -12,12 +12,12 @@ use crate::tui::app::App;
 use crate::tui::render::StoreSnapshot;
 use crate::tui::sprites::chicken;
 use crate::tui::sprites::renderer::sprite_to_lines;
+use crate::tui::theme::theme;
 
-const CARD_BG: Color = Color::Rgb(22, 22, 34);
-const DIM: Color = Color::Rgb(110, 110, 140);
-const BUBBLE_BG: Color = Color::Rgb(32, 32, 48);
-const BUBBLE_BORDER: Color = Color::Rgb(55, 55, 75);
-const BG: Color = Color::Rgb(18, 18, 28);
+fn bg() -> Color { theme().bg }
+fn card_bg() -> Color { theme().card_bg }
+fn dim() -> Color { theme().text_dim }
+fn border() -> Color { theme().border }
 
 /// Get unique project names from agents
 pub fn get_projects(snap: &StoreSnapshot) -> Vec<String> {
@@ -58,7 +58,7 @@ fn filter_snap_by_project<'a>(
 pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
     // Fill background
     f.render_widget(
-        Paragraph::new("").style(Style::default().bg(BG)),
+        Paragraph::new("").style(Style::default().bg(bg())),
         area,
     );
 
@@ -85,21 +85,21 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) 
 
     // Render project tabs
     if has_projects {
-        let mut tab_spans = vec![Span::styled(" ", Style::default().bg(BG))];
+        let mut tab_spans = vec![Span::styled(" ", Style::default().bg(bg()))];
         for (i, proj) in projects.iter().enumerate() {
             let name = short_project_name(proj);
             let is_selected = app.current_project.as_deref() == Some(proj);
             let style = if is_selected {
                 Style::default().fg(Color::Rgb(255, 220, 80)).bg(Color::Rgb(50, 45, 30)).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(DIM).bg(BG)
+                Style::default().fg(dim()).bg(bg())
             };
             tab_spans.push(Span::styled(format!(" {} ", name), style));
             if i < projects.len() - 1 {
-                tab_spans.push(Span::styled(" \u{2502} ", Style::default().fg(Color::Rgb(40, 40, 55)).bg(BG)));
+                tab_spans.push(Span::styled(" \u{2502} ", Style::default().fg(Color::Rgb(40, 40, 55)).bg(bg())));
             }
         }
-        f.render_widget(Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(BG)), chunks[0]);
+        f.render_widget(Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(bg())), chunks[0]);
     }
 
     // Main: left (leader + party) | right (feed)
@@ -115,20 +115,20 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) 
 fn render_empty_party(f: &mut Frame, area: Rect, port: u16) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(50, 50, 70)))
-        .style(Style::default().bg(CARD_BG));
+        .border_style(Style::default().fg(border()))
+        .style(Style::default().bg(card_bg()));
 
     let lines = vec![
         Line::raw(""),
         Line::raw(""),
         Line::from(Span::styled(
             format!("  Waiting for events on :{} ...", port),
-            Style::default().fg(DIM),
+            Style::default().fg(dim()),
         )),
         Line::raw(""),
         Line::from(Span::styled(
             "  The party is empty. Send hook events to hatch some chickens!",
-            Style::default().fg(DIM),
+            Style::default().fg(dim()),
         )),
         Line::raw(""),
         Line::from(Span::styled(
@@ -155,8 +155,8 @@ fn render_empty_party(f: &mut Frame, area: Rect, port: u16) {
 fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
     let left_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(50, 50, 70)))
-        .style(Style::default().bg(CARD_BG));
+        .border_style(Style::default().fg(border()))
+        .style(Style::default().bg(card_bg()));
     let li = left_block.inner(area);
     f.render_widget(left_block, area);
 
@@ -181,19 +181,19 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         Span::styled(
             format!(" {} ", leader.display_name),
             Style::default()
-                .fg(Color::Rgb(255, 200, 80))
+                .fg(theme().lead_name)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             " LEAD ",
             Style::default()
-                .fg(Color::Rgb(255, 220, 80))
-                .bg(Color::Rgb(80, 60, 20))
+                .fg(theme().lead_badge_fg)
+                .bg(theme().lead_badge_bg)
                 .add_modifier(Modifier::BOLD),
         ),
     ]);
     f.render_widget(
-        Paragraph::new(name_line).style(Style::default().bg(CARD_BG)),
+        Paragraph::new(name_line).style(Style::default().bg(card_bg())),
         Rect::new(li.x, y, li.width, 1),
     );
     y += 1;
@@ -208,14 +208,14 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     } else {
         chicken::chicken_idle(tick / 4)
     };
-    let chicken_lines = sprite_to_lines(&chicken_pixels, CARD_BG);
+    let chicken_lines = sprite_to_lines(&chicken_pixels, card_bg());
     let cw = 28u16;
     let cx = li.x + (li.width.saturating_sub(cw)) / 2;
     for (j, line) in chicken_lines.iter().enumerate() {
         let sy = y + j as u16;
         if sy < li.y + li.height {
             f.render_widget(
-                Paragraph::new(line.clone()).style(Style::default().bg(CARD_BG)),
+                Paragraph::new(line.clone()).style(Style::default().bg(card_bg())),
                 Rect::new(cx, sy, cw, 1),
             );
         }
@@ -250,7 +250,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             .unwrap_or_else(|| "-".into());
 
         let hp_line = Line::from(vec![
-            Span::styled(" HP ", Style::default().fg(DIM)),
+            Span::styled(" HP ", Style::default().fg(dim())),
             Span::styled(
                 "\u{2588}".repeat(filled),
                 Style::default().fg(hp_color),
@@ -265,11 +265,11 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             ),
             Span::styled(
                 format!("  {} {}", tokens_str, cost_str),
-                Style::default().fg(DIM),
+                Style::default().fg(dim()),
             ),
         ]);
         f.render_widget(
-            Paragraph::new(hp_line).style(Style::default().bg(CARD_BG)),
+            Paragraph::new(hp_line).style(Style::default().bg(card_bg())),
             Rect::new(li.x, y, li.width, 1),
         );
         y += 1;
@@ -293,7 +293,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             Style::default().fg(Color::Rgb(90, 90, 110)),
         ));
         f.render_widget(
-            Paragraph::new(sep).style(Style::default().bg(CARD_BG)),
+            Paragraph::new(sep).style(Style::default().bg(card_bg())),
             Rect::new(li.x, y, li.width, 1),
         );
         y += 1;
@@ -329,7 +329,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             _ => chicken::egg_sprite(),
         };
 
-        let spr_lines = sprite_to_lines(&sprite, CARD_BG);
+        let spr_lines = sprite_to_lines(&sprite, card_bg());
         let spr_w = if stage == "egg" || stage == "hatching" {
             12u16
         } else {
@@ -341,7 +341,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             let sy = my + j as u16;
             if sy < li.y + li.height {
                 f.render_widget(
-                    Paragraph::new(line.clone()).style(Style::default().bg(CARD_BG)),
+                    Paragraph::new(line.clone()).style(Style::default().bg(card_bg())),
                     Rect::new(spr_x, sy, spr_w, 1),
                 );
             }
@@ -357,7 +357,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                         zzz,
                         Style::default().fg(Color::Rgb(120, 120, 170)),
                     )))
-                    .style(Style::default().bg(CARD_BG)),
+                    .style(Style::default().bg(card_bg())),
                     Rect::new(spr_x + spr_w, my, 5, 1),
                 );
             }
@@ -379,14 +379,14 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                 "egg" => Color::Rgb(200, 195, 180),
                 "hatching" | "peeking" => Color::Rgb(230, 200, 100),
                 "chick" | "done" => Color::Rgb(255, 220, 80),
-                _ => DIM,
+                _ => dim(),
             };
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(
                     format!("{:^width$}", label, width = col_w as usize),
                     Style::default().fg(color),
                 )))
-                .style(Style::default().bg(CARD_BG)),
+                .style(Style::default().bg(card_bg())),
                 Rect::new(mx, name_y, col_w, 1),
             );
         }
@@ -416,7 +416,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             };
 
             let sc = if is_done {
-                DIM
+                dim()
             } else if is_waiting {
                 Color::Rgb(200, 200, 80)
             } else {
@@ -427,7 +427,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                     format!("{:^width$}", display_text, width = col_w as usize),
                     Style::default().fg(sc),
                 )))
-                .style(Style::default().bg(CARD_BG)),
+                .style(Style::default().bg(card_bg())),
                 Rect::new(mx, state_y, col_w, 1),
             );
         }
@@ -439,14 +439,14 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(50, 50, 70)))
+        .border_style(Style::default().fg(border()))
         .title(" conversation ")
         .title_style(
             Style::default()
                 .fg(Color::Rgb(180, 180, 220))
                 .add_modifier(Modifier::BOLD),
         )
-        .style(Style::default().bg(CARD_BG));
+        .style(Style::default().bg(card_bg()));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -480,9 +480,9 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
             RuntimeEventType::TurnActive => {
                 lines.push(Line::raw(""));
                 lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(DIM)),
-                    Span::styled("\u{25b6} ", Style::default().fg(Color::Rgb(100, 200, 100))),
-                    Span::styled("user prompt", Style::default().fg(Color::Rgb(100, 200, 100)).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(dim())),
+                    Span::styled("\u{25b6} ", Style::default().fg(theme().user_prompt)),
+                    Span::styled("user prompt", Style::default().fg(theme().user_prompt).add_modifier(Modifier::BOLD)),
                 ]));
             }
 
@@ -493,13 +493,13 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
 
                 let line_color = Color::Rgb(50, 50, 70);
                 let (tree, icon, color) = if is_sub {
-                    ("\u{2502} \u{251c}\u{2500}", "\u{1f423} ", Color::Rgb(160, 180, 200))
+                    ("\u{2502} \u{251c}\u{2500}", "\u{1f423} ", theme().sub_agent_text)
                 } else {
-                    ("\u{251c}\u{2500}", "\u{1f414} ", Color::Rgb(180, 170, 220))
+                    ("\u{251c}\u{2500}", "\u{1f414} ", theme().assistant_text)
                 };
 
                 lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(DIM)),
+                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(dim())),
                     Span::styled(tree, Style::default().fg(line_color)),
                     Span::styled(icon, Style::default().fg(color)),
                     Span::styled(text.to_string(), Style::default().fg(color)),
@@ -526,7 +526,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
 
                 let line_color = Color::Rgb(50, 50, 70);
                 lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(DIM)),
+                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(dim())),
                     Span::styled(tree, Style::default().fg(line_color)),
                     Span::styled("\u{2699} ", Style::default().fg(tool_color)),
                     Span::styled(tool_text, Style::default().fg(tool_color)),
@@ -543,19 +543,19 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 };
                 let line_color = Color::Rgb(50, 50, 70);
                 lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(DIM)),
+                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(dim())),
                     Span::styled(tree, Style::default().fg(line_color)),
-                    Span::styled("\u{2713} ", Style::default().fg(Color::Rgb(80, 180, 80))),
-                    Span::styled(tool_text, Style::default().fg(DIM)),
+                    Span::styled("\u{2713} ", Style::default().fg(theme().tool_done)),
+                    Span::styled(tool_text, Style::default().fg(dim())),
                 ]));
             }
 
             // Waiting/permission
             RuntimeEventType::PermissionWait => {
                 lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(DIM)),
-                    Span::styled(" \u{23f3} ", Style::default().fg(Color::Rgb(255, 200, 80))),
-                    Span::styled("waiting for permission...", Style::default().fg(Color::Rgb(255, 200, 80))),
+                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(dim())),
+                    Span::styled(" \u{23f3} ", Style::default().fg(theme().lead_name)),
+                    Span::styled("waiting for permission...", Style::default().fg(theme().lead_name)),
                 ]));
             }
 
@@ -579,7 +579,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     let visible: Vec<Line> = lines[start..end].to_vec();
 
     f.render_widget(
-        Paragraph::new(visible).wrap(Wrap { trim: false }).style(Style::default().bg(CARD_BG)),
+        Paragraph::new(visible).wrap(Wrap { trim: false }).style(Style::default().bg(card_bg())),
         inner,
     );
 }
