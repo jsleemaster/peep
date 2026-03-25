@@ -2,25 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::tui::sprites::stage_state::StageState;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tab {
-    Stage,
-    Agents,
-}
-
-impl Tab {
-    #[allow(dead_code)]
-    pub fn label(&self) -> &'static str {
-        match self {
-            Tab::Stage => "Stage",
-            Tab::Agents => "Agents",
-        }
-    }
-
-    pub fn all() -> &'static [Tab] {
-        &[Tab::Stage, Tab::Agents]
-    }
-}
+// Single view — no tabs needed
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusPane {
@@ -29,7 +11,6 @@ pub enum FocusPane {
 }
 
 pub struct App {
-    pub active_tab: Tab,
     pub focus: FocusPane,
     pub running: bool,
     pub show_detail_overlay: bool,
@@ -39,8 +20,6 @@ pub struct App {
     // Scroll / selection state
     pub sidebar_selected: usize,
     pub feed_scroll_offset: usize,
-    pub session_scroll_offset: usize,
-    pub agents_tab_selected: usize,
 
     // Auto-scroll: true when user hasn't scrolled up
     pub feed_auto_scroll: bool,
@@ -66,7 +45,6 @@ pub struct App {
 impl App {
     pub fn new(port: u16) -> Self {
         App {
-            active_tab: Tab::Stage,
             focus: FocusPane::MainPanel,
             running: true,
             show_detail_overlay: false,
@@ -74,8 +52,6 @@ impl App {
             filter_text: String::new(),
             sidebar_selected: 0,
             feed_scroll_offset: 0,
-            session_scroll_offset: 0,
-            agents_tab_selected: 0,
             feed_auto_scroll: true,
             agent_count: 0,
             feed_count: 0,
@@ -143,12 +119,6 @@ impl App {
         match key.code {
             KeyCode::Char('q') => self.running = false,
 
-            // Tab switching
-            KeyCode::Tab => self.next_tab(),
-            KeyCode::BackTab => self.prev_tab(),
-            KeyCode::Char('1') => self.active_tab = Tab::Stage,
-            KeyCode::Char('2') => self.active_tab = Tab::Agents,
-
             // Focus switching
             KeyCode::Char('h') | KeyCode::Left => self.focus = FocusPane::Sidebar,
             KeyCode::Char('l') | KeyCode::Right => self.focus = FocusPane::MainPanel,
@@ -180,17 +150,6 @@ impl App {
         }
     }
 
-    fn next_tab(&mut self) {
-        self.active_tab = match self.active_tab {
-            Tab::Stage => Tab::Agents,
-            Tab::Agents => Tab::Stage,
-        };
-    }
-
-    fn prev_tab(&mut self) {
-        self.next_tab(); // only 2 tabs, same as next
-    }
-
     fn scroll_down(&mut self) {
         match self.focus {
             FocusPane::Sidebar => {
@@ -199,29 +158,15 @@ impl App {
                     self.sidebar_selected += 1;
                 }
             }
-            FocusPane::MainPanel => match self.active_tab {
-                Tab::Stage => {
-                    let max = self.feed_count.saturating_sub(1);
-                    if self.feed_scroll_offset < max {
-                        self.feed_scroll_offset += 1;
-                    }
-                    if self.feed_scroll_offset >= self.feed_count.saturating_sub(1) {
-                        self.feed_auto_scroll = true;
-                    }
+            FocusPane::MainPanel => {
+                let max = self.feed_count.saturating_sub(1);
+                if self.feed_scroll_offset < max {
+                    self.feed_scroll_offset += 1;
                 }
-                Tab::Agents => {
-                    let max = self.agent_count.saturating_sub(1);
-                    if self.agents_tab_selected < max {
-                        self.agents_tab_selected += 1;
-                    }
+                if self.feed_scroll_offset >= self.feed_count.saturating_sub(1) {
+                    self.feed_auto_scroll = true;
                 }
-                Tab::Agents => {
-                    let max = self.agent_count.saturating_sub(1);
-                    if self.agents_tab_selected < max {
-                        self.agents_tab_selected += 1;
-                    }
-                }
-            },
+            }
         }
     }
 
@@ -230,33 +175,22 @@ impl App {
             FocusPane::Sidebar => {
                 self.sidebar_selected = self.sidebar_selected.saturating_sub(1);
             }
-            FocusPane::MainPanel => match self.active_tab {
-                Tab::Stage => {
-                    if self.feed_scroll_offset > 0 {
-                        self.feed_scroll_offset = self.feed_scroll_offset.saturating_sub(1);
-                        self.feed_auto_scroll = false;
-                    }
+            FocusPane::MainPanel => {
+                if self.feed_scroll_offset > 0 {
+                    self.feed_scroll_offset = self.feed_scroll_offset.saturating_sub(1);
+                    self.feed_auto_scroll = false;
                 }
-                Tab::Agents => {
-                    self.agents_tab_selected = self.agents_tab_selected.saturating_sub(1);
-                }
-                Tab::Agents => {
-                    self.agents_tab_selected = self.agents_tab_selected.saturating_sub(1);
-                }
-            },
+            }
         }
     }
 
     fn scroll_to_top(&mut self) {
         match self.focus {
             FocusPane::Sidebar => self.sidebar_selected = 0,
-            FocusPane::MainPanel => match self.active_tab {
-                Tab::Stage => {
-                    self.feed_scroll_offset = 0;
-                    self.feed_auto_scroll = false;
-                }
-                Tab::Agents => self.agents_tab_selected = 0,
-            },
+            FocusPane::MainPanel => {
+                self.feed_scroll_offset = 0;
+                self.feed_auto_scroll = false;
+            }
         }
     }
 
@@ -265,15 +199,10 @@ impl App {
             FocusPane::Sidebar => {
                 self.sidebar_selected = self.agent_count.saturating_sub(1);
             }
-            FocusPane::MainPanel => match self.active_tab {
-                Tab::Stage => {
-                    self.feed_scroll_offset = self.feed_count.saturating_sub(1);
-                    self.feed_auto_scroll = true;
-                }
-                Tab::Agents => {
-                    self.agents_tab_selected = self.agent_count.saturating_sub(1);
-                }
-            },
+            FocusPane::MainPanel => {
+                self.feed_scroll_offset = self.feed_count.saturating_sub(1);
+                self.feed_auto_scroll = true;
+            }
         }
     }
 

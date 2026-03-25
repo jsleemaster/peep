@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::protocol::types::AgentState;
 use crate::store::state::AppStore;
-use crate::tui::app::{App, Tab};
+use crate::tui::app::App;
 use crate::tui::render::StoreSnapshot;
 use crate::tui::widgets::stage;
 
@@ -19,8 +19,8 @@ pub fn render_status_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnaps
         .borders(Borders::TOP)
         .border_style(Style::default().fg(Color::DarkGray));
 
-    // On Stage tab, show party composition
-    if app.active_tab == Tab::Stage && !snap.agents.is_empty() {
+    // Show party composition
+    if !snap.agents.is_empty() {
         let summary = stage::party_summary(snap);
 
         let active_count = snap
