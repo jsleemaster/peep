@@ -60,7 +60,7 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, _app: &App, snap: &StoreSnapsho
     let left_len: usize = stats.iter().map(|s| s.content.chars().count()).sum();
     let padding = (area.width as usize).saturating_sub(left_len + hint.chars().count() + 2);
     stats.push(Span::raw(" ".repeat(padding)));
-    stats.push(Span::styled(hint, Style::default().fg(Color::Rgb(80, 80, 110))));
+    stats.push(Span::styled(hint, Style::default().fg(Color::White)));
 
     let stats_line = Line::from(stats);
 
