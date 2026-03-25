@@ -227,9 +227,16 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     }
     y += chicken_lines.len() as u16;
 
-    // Leader stats: HP bar
+    // Leader stats: HP bar (use context% if available, else estimate from tokens)
     if y < li.y + li.height {
-        let ctx_pct = leader.context_percent.unwrap_or(0.0);
+        let ctx_pct = leader.context_percent.unwrap_or_else(|| {
+            // Rough estimate: assume 200k token context, show usage as %
+            if leader.total_tokens > 0 {
+                ((leader.total_tokens as f64 / 200_000.0) * 100.0).min(100.0)
+            } else {
+                0.0
+            }
+        });
         let filled = ((ctx_pct / 100.0) * 10.0).round() as usize;
         let empty = 10usize.saturating_sub(filled);
         let hp_color = if ctx_pct > 80.0 {
@@ -436,7 +443,7 @@ fn render_commands_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnaps
         )
         .style(Style::default().bg(CARD_BG));
 
-    // Filter for tool events (ToolStart / ToolDone)
+    // Filter for tool events with actual tool names (skip empty ToolDone)
     let filter = &app.filter_text;
     let cmd_events: Vec<&FeedEvent> = snap
         .feed

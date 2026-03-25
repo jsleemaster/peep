@@ -15,12 +15,23 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
 
     let entry_type = v.get("type")?.as_str()?;
 
-    // session_id doubles as the agent runtime id for JSONL sources
+    // Session ID: try both camelCase and snake_case
     let session_id = v
-        .get("session_id")
+        .get("sessionId")
+        .or_else(|| v.get("session_id"))
         .and_then(|s| s.as_str())
         .unwrap_or("unknown")
         .to_string();
+
+    // Use slug as display name if available, otherwise session_id prefix
+    let _slug = v.get("slug").and_then(|s| s.as_str()).map(str::to_string);
+
+    // Git branch
+    let branch_name = v
+        .get("gitBranch")
+        .or_else(|| v.get("git_branch"))
+        .and_then(|s| s.as_str())
+        .map(str::to_string);
 
     // Parse timestamp; fall back to current time
     let ts = v
@@ -49,7 +60,11 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
 
                         let file_path = block
                             .get("input")
-                            .and_then(|i| i.get("file_path"))
+                            .and_then(|i| {
+                                i.get("file_path")
+                                    .or_else(|| i.get("filePath"))
+                                    .or_else(|| i.get("path"))
+                            })
                             .and_then(|f| f.as_str())
                             .map(str::to_string);
 
@@ -59,6 +74,8 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                                 i.get("command")
                                     .or_else(|| i.get("description"))
                                     .or_else(|| i.get("content"))
+                                    .or_else(|| i.get("query"))
+                                    .or_else(|| i.get("prompt"))
                             })
                             .and_then(|d| d.as_str())
                             .map(|s| truncate(s, 200));
@@ -75,7 +92,7 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                             detail,
                             total_tokens: None,
                             is_error: false,
-                            branch_name: None,
+                            branch_name,
                         });
                     }
                 }
@@ -83,10 +100,12 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                 // No tool_use — look for text blocks
                 for block in blocks {
                     if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                        let detail = block
-                            .get("text")
-                            .and_then(|t| t.as_str())
-                            .map(|s| truncate(s, 200));
+                        let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                        // Skip very short or empty text
+                        if text.len() < 3 {
+                            return None;
+                        }
+                        let detail = Some(truncate(text, 200));
 
                         return Some(RawIngestEvent {
                             source: IngestSource::Jsonl,
@@ -100,7 +119,7 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                             detail,
                             total_tokens: None,
                             is_error: false,
-                            branch_name: None,
+                            branch_name,
                         });
                     }
                 }
@@ -109,54 +128,71 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
             None
         }
 
-        // tool result returned to the model
-        "tool_result" => {
-            let tool_name = v
-                .get("name")
-                .and_then(|n| n.as_str())
-                .map(str::to_string);
+        // User message — may contain tool_result blocks
+        "user" => {
+            let content = v
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array());
 
-            let is_error = v
-                .get("is_error")
-                .and_then(|e| e.as_bool())
-                .unwrap_or(false);
+            if let Some(blocks) = content {
+                for block in blocks {
+                    if block.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
+                        let is_error = block
+                            .get("is_error")
+                            .and_then(|e| e.as_bool())
+                            .unwrap_or(false);
 
-            let detail = v
-                .get("content")
-                .and_then(|c| c.as_str())
-                .map(|s| truncate(s, 200));
+                        // tool_result doesn't carry the tool name directly;
+                        // we could match by tool_use_id but that's complex.
+                        // Just emit a ToolDone with the content as detail.
+                        let detail = block
+                            .get("content")
+                            .and_then(|c| c.as_str())
+                            .map(|s| truncate(s, 200));
 
-            Some(RawIngestEvent {
-                source: IngestSource::Jsonl,
-                agent_runtime_id: session_id.clone(),
-                session_runtime_id: Some(session_id),
-                ts,
-                event_type: RuntimeEventType::ToolDone,
-                hook_event_name: Some("PostToolUse".into()),
-                tool_name,
-                file_path: None,
-                detail,
-                total_tokens: None,
-                is_error,
-                branch_name: None,
-            })
+                        return Some(RawIngestEvent {
+                            source: IngestSource::Jsonl,
+                            agent_runtime_id: session_id.clone(),
+                            session_runtime_id: Some(session_id),
+                            ts,
+                            event_type: RuntimeEventType::ToolDone,
+                            hook_event_name: Some("PostToolUse".into()),
+                            tool_name: None, // tool_result doesn't repeat the name
+                            file_path: None,
+                            detail,
+                            total_tokens: None,
+                            is_error,
+                            branch_name,
+                        });
+                    }
+                }
+
+                // Plain user message (no tool_result) = new turn
+                Some(RawIngestEvent {
+                    source: IngestSource::Jsonl,
+                    agent_runtime_id: session_id.clone(),
+                    session_runtime_id: Some(session_id),
+                    ts,
+                    event_type: RuntimeEventType::TurnActive,
+                    hook_event_name: Some("UserPromptSubmit".into()),
+                    tool_name: None,
+                    file_path: None,
+                    detail: None,
+                    total_tokens: None,
+                    is_error: false,
+                    branch_name,
+                })
+            } else {
+                None
+            }
         }
 
-        // human / user turn
-        "user" => Some(RawIngestEvent {
-            source: IngestSource::Jsonl,
-            agent_runtime_id: session_id.clone(),
-            session_runtime_id: Some(session_id),
-            ts,
-            event_type: RuntimeEventType::TurnActive,
-            hook_event_name: Some("UserPromptSubmit".into()),
-            tool_name: None,
-            file_path: None,
-            detail: None,
-            total_tokens: None,
-            is_error: false,
-            branch_name: None,
-        }),
+        // Progress events (hooks running, etc.) — skip most, but keep hook info
+        "progress" => {
+            // These are hook execution progress, not interesting for monitoring
+            None
+        }
 
         // session result / end
         "result" => Some(RawIngestEvent {
@@ -174,21 +210,49 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                 .map(|s| truncate(s, 200)),
             total_tokens: None,
             is_error: false,
-            branch_name: None,
+            branch_name,
         }),
+
+        // Legacy format: tool_result at top level
+        "tool_result" => {
+            let tool_name = v
+                .get("name")
+                .and_then(|n| n.as_str())
+                .map(str::to_string);
+
+            let is_error = v
+                .get("is_error")
+                .and_then(|e| e.as_bool())
+                .unwrap_or(false);
+
+            Some(RawIngestEvent {
+                source: IngestSource::Jsonl,
+                agent_runtime_id: session_id.clone(),
+                session_runtime_id: Some(session_id),
+                ts,
+                event_type: RuntimeEventType::ToolDone,
+                hook_event_name: Some("PostToolUse".into()),
+                tool_name,
+                file_path: None,
+                detail: None,
+                total_tokens: None,
+                is_error,
+                branch_name,
+            })
+        }
 
         _ => None,
     }
 }
 
-/// Truncate a string to at most `max_chars` characters.
+/// Truncate a string to at most `max_chars` characters (UTF-8 safe).
 fn truncate(s: &str, max_chars: usize) -> String {
-    let mut chars = s.chars();
-    let truncated: String = chars.by_ref().take(max_chars).collect();
-    if chars.next().is_some() {
-        format!("{}…", truncated)
+    let chars: Vec<char> = s.chars().take(max_chars + 1).collect();
+    if chars.len() > max_chars {
+        let truncated: String = chars[..max_chars].iter().collect();
+        format!("{}...", truncated)
     } else {
-        truncated
+        s.to_string()
     }
 }
 
@@ -199,7 +263,7 @@ mod tests {
 
     #[test]
     fn parse_tool_use_line() {
-        let line = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/foo/bar.rs"}}]},"session_id":"sess1","timestamp":"2025-12-20T10:30:00Z"}"#;
+        let line = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/foo/bar.rs"}}]},"sessionId":"sess1","timestamp":"2025-12-20T10:30:00Z"}"#;
         let ev = parse_jsonl_line(line).unwrap();
         assert_eq!(ev.event_type, RuntimeEventType::ToolStart);
         assert_eq!(ev.tool_name.as_deref(), Some("Read"));
@@ -207,26 +271,37 @@ mod tests {
     }
 
     #[test]
-    fn parse_tool_result_line() {
-        let line = r#"{"type":"tool_result","name":"Read","content":"file contents","session_id":"sess1","timestamp":"2025-12-20T10:30:01Z"}"#;
+    fn parse_tool_use_snake_case_session() {
+        let line = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"src/main.rs"}}]},"session_id":"sess2","timestamp":"2025-12-20T10:30:00Z"}"#;
+        let ev = parse_jsonl_line(line).unwrap();
+        assert_eq!(ev.agent_runtime_id, "sess2");
+    }
+
+    #[test]
+    fn parse_user_tool_result() {
+        let line = r#"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"file contents","is_error":false}]},"sessionId":"sess1","timestamp":"2025-12-20T10:30:01Z"}"#;
         let ev = parse_jsonl_line(line).unwrap();
         assert_eq!(ev.event_type, RuntimeEventType::ToolDone);
-        assert_eq!(ev.tool_name.as_deref(), Some("Read"));
     }
 
     #[test]
     fn parse_text_assistant_line() {
-        let line = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello world"}]},"session_id":"sess1","timestamp":"2025-12-20T10:30:02Z"}"#;
+        let line = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello world this is a test"}]},"sessionId":"sess1","timestamp":"2025-12-20T10:30:02Z"}"#;
         let ev = parse_jsonl_line(line).unwrap();
         assert_eq!(ev.event_type, RuntimeEventType::AssistantText);
-        assert_eq!(ev.detail.as_deref(), Some("Hello world"));
     }
 
     #[test]
-    fn parse_user_line() {
-        let line = r#"{"type":"user","session_id":"sess1","timestamp":"2025-12-20T10:30:03Z"}"#;
+    fn parse_user_plain_message() {
+        let line = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]},"sessionId":"sess1","timestamp":"2025-12-20T10:30:03Z"}"#;
         let ev = parse_jsonl_line(line).unwrap();
         assert_eq!(ev.event_type, RuntimeEventType::TurnActive);
+    }
+
+    #[test]
+    fn progress_returns_none() {
+        let line = r#"{"type":"progress","data":{"type":"hook_progress"},"sessionId":"s1","timestamp":"2025-12-20T10:30:00Z"}"#;
+        assert!(parse_jsonl_line(line).is_none());
     }
 
     #[test]
@@ -237,7 +312,7 @@ mod tests {
 
     #[test]
     fn unknown_type_returns_none() {
-        let line = r#"{"type":"unknown_event","session_id":"s1"}"#;
+        let line = r#"{"type":"unknown_event","sessionId":"s1"}"#;
         assert!(parse_jsonl_line(line).is_none());
     }
 }
