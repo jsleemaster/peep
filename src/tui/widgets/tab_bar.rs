@@ -65,7 +65,8 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, _app: &App, snap: &StoreSnapsho
     let stats_line = Line::from(stats);
 
     let block = Block::default()
-        .borders(Borders::NONE)
+        .borders(Borders::BOTTOM)
+        .border_style(Style::default().fg(Color::Rgb(50, 50, 70)))
         .style(Style::default().bg(Color::Rgb(22, 22, 34)));
 
     let paragraph = Paragraph::new(vec![title_line, stats_line]).block(block);
