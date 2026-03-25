@@ -223,24 +223,25 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     }
     y += chicken_lines.len() as u16;
 
-    // Leader stats: HP bar (use context% if available, else estimate from tokens)
+    // Leader stats: HP bar (100% = full health, decreases as context fills up)
     if y < li.y + li.height {
-        let ctx_pct = leader.context_percent.unwrap_or_else(|| {
-            // Rough estimate: assume 200k token context, show usage as %
+        let used_pct = leader.context_percent.unwrap_or_else(|| {
+            // Rough estimate: assume 200k token context
             if leader.total_tokens > 0 {
                 ((leader.total_tokens as f64 / 200_000.0) * 100.0).min(100.0)
             } else {
                 0.0
             }
         });
+        let ctx_pct = (100.0 - used_pct).max(0.0); // HP = remaining
         let filled = ((ctx_pct / 100.0) * 10.0).round() as usize;
         let empty = 10usize.saturating_sub(filled);
-        let hp_color = if ctx_pct > 80.0 {
-            Color::Rgb(255, 80, 80)
-        } else if ctx_pct > 50.0 {
-            Color::Rgb(255, 200, 80)
+        let hp_color = if ctx_pct < 20.0 {
+            Color::Rgb(255, 80, 80)   // low HP = danger red
+        } else if ctx_pct < 50.0 {
+            Color::Rgb(255, 200, 80)  // medium = warning yellow
         } else {
-            Color::Rgb(100, 220, 140)
+            Color::Rgb(100, 220, 140) // healthy = green
         };
 
         let tokens_str = AppStore::format_tokens(leader.total_tokens);
