@@ -213,13 +213,11 @@ impl App {
                 }
             }
             FocusPane::MainPanel => match self.active_tab {
-                Tab::Stage => {} // no scrolling on stage
-                Tab::Feed => {
+                Tab::Stage | Tab::Feed => {
                     let max = self.feed_count.saturating_sub(1);
                     if self.feed_scroll_offset < max {
                         self.feed_scroll_offset += 1;
                     }
-                    // If user scrolled to bottom, re-enable auto-scroll
                     if self.feed_scroll_offset >= self.feed_count.saturating_sub(1) {
                         self.feed_auto_scroll = true;
                     }
@@ -246,11 +244,10 @@ impl App {
                 self.sidebar_selected = self.sidebar_selected.saturating_sub(1);
             }
             FocusPane::MainPanel => match self.active_tab {
-                Tab::Stage => {}
-                Tab::Feed => {
+                Tab::Stage | Tab::Feed => {
                     if self.feed_scroll_offset > 0 {
                         self.feed_scroll_offset = self.feed_scroll_offset.saturating_sub(1);
-                        self.feed_auto_scroll = false; // user scrolled up
+                        self.feed_auto_scroll = false;
                     }
                 }
                 Tab::Sessions => {

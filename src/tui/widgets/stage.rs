@@ -14,7 +14,7 @@ use crate::tui::sprites::chicken;
 use crate::tui::sprites::renderer::sprite_to_lines;
 
 const CARD_BG: Color = Color::Rgb(22, 22, 34);
-const DIM: Color = Color::Rgb(70, 70, 90);
+const DIM: Color = Color::Rgb(110, 110, 140);
 const BUBBLE_BG: Color = Color::Rgb(32, 32, 48);
 const BUBBLE_BORDER: Color = Color::Rgb(55, 55, 75);
 const BG: Color = Color::Rgb(18, 18, 28);
@@ -99,7 +99,7 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) 
                 tab_spans.push(Span::styled(" \u{2502} ", Style::default().fg(Color::Rgb(40, 40, 55)).bg(BG)));
             }
         }
-        tab_spans.push(Span::styled("  [,] switch", Style::default().fg(Color::Rgb(40, 40, 55)).bg(BG)));
+        tab_spans.push(Span::styled("  [,] switch", Style::default().fg(Color::Rgb(90, 90, 110)).bg(BG)));
         f.render_widget(Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(BG)), chunks[0]);
     }
 
@@ -291,7 +291,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                 party_members.len(),
                 "\u{2500}".repeat(22)
             ),
-            Style::default().fg(Color::Rgb(50, 50, 70)),
+            Style::default().fg(Color::Rgb(90, 90, 110)),
         ));
         f.render_widget(
             Paragraph::new(sep).style(Style::default().bg(CARD_BG)),
@@ -558,10 +558,20 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         }
     }
 
-    // Show last N lines that fit
+    // Apply scroll offset (j/k keys)
     let max_lines = inner.height as usize;
-    let start = lines.len().saturating_sub(max_lines);
-    let visible: Vec<Line> = lines[start..].to_vec();
+    let total = lines.len();
+    let default_start = total.saturating_sub(max_lines);
+
+    let start = if app.feed_auto_scroll {
+        default_start
+    } else {
+        // scroll_offset 0 = latest (bottom), higher = further back
+        let offset = app.feed_scroll_offset.min(total.saturating_sub(1));
+        total.saturating_sub(max_lines + offset)
+    };
+    let end = (start + max_lines).min(total);
+    let visible: Vec<Line> = lines[start..end].to_vec();
 
     f.render_widget(
         Paragraph::new(visible).wrap(Wrap { trim: false }).style(Style::default().bg(CARD_BG)),
