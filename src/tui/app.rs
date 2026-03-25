@@ -5,7 +5,6 @@ use crate::tui::sprites::stage_state::StageState;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Stage,
-    Feed,
     Agents,
     Sessions,
 }
@@ -15,14 +14,13 @@ impl Tab {
     pub fn label(&self) -> &'static str {
         match self {
             Tab::Stage => "Stage",
-            Tab::Feed => "Feed",
             Tab::Agents => "Agents",
             Tab::Sessions => "Sessions",
         }
     }
 
     pub fn all() -> &'static [Tab] {
-        &[Tab::Stage, Tab::Feed, Tab::Agents, Tab::Sessions]
+        &[Tab::Stage, Tab::Agents, Tab::Sessions]
     }
 }
 
@@ -151,9 +149,8 @@ impl App {
             KeyCode::Tab => self.next_tab(),
             KeyCode::BackTab => self.prev_tab(),
             KeyCode::Char('1') => self.active_tab = Tab::Stage,
-            KeyCode::Char('2') => self.active_tab = Tab::Feed,
-            KeyCode::Char('3') => self.active_tab = Tab::Agents,
-            KeyCode::Char('4') => self.active_tab = Tab::Sessions,
+            KeyCode::Char('2') => self.active_tab = Tab::Agents,
+            KeyCode::Char('3') => self.active_tab = Tab::Sessions,
 
             // Focus switching
             KeyCode::Char('h') | KeyCode::Left => self.focus = FocusPane::Sidebar,
@@ -188,8 +185,7 @@ impl App {
 
     fn next_tab(&mut self) {
         self.active_tab = match self.active_tab {
-            Tab::Stage => Tab::Feed,
-            Tab::Feed => Tab::Agents,
+            Tab::Stage => Tab::Agents,
             Tab::Agents => Tab::Sessions,
             Tab::Sessions => Tab::Stage,
         };
@@ -198,8 +194,7 @@ impl App {
     fn prev_tab(&mut self) {
         self.active_tab = match self.active_tab {
             Tab::Stage => Tab::Sessions,
-            Tab::Feed => Tab::Stage,
-            Tab::Agents => Tab::Feed,
+            Tab::Agents => Tab::Stage,
             Tab::Sessions => Tab::Agents,
         };
     }
@@ -213,7 +208,7 @@ impl App {
                 }
             }
             FocusPane::MainPanel => match self.active_tab {
-                Tab::Stage | Tab::Feed => {
+                Tab::Stage => {
                     let max = self.feed_count.saturating_sub(1);
                     if self.feed_scroll_offset < max {
                         self.feed_scroll_offset += 1;
@@ -244,7 +239,7 @@ impl App {
                 self.sidebar_selected = self.sidebar_selected.saturating_sub(1);
             }
             FocusPane::MainPanel => match self.active_tab {
-                Tab::Stage | Tab::Feed => {
+                Tab::Stage => {
                     if self.feed_scroll_offset > 0 {
                         self.feed_scroll_offset = self.feed_scroll_offset.saturating_sub(1);
                         self.feed_auto_scroll = false;
@@ -264,8 +259,7 @@ impl App {
         match self.focus {
             FocusPane::Sidebar => self.sidebar_selected = 0,
             FocusPane::MainPanel => match self.active_tab {
-                Tab::Stage => {}
-                Tab::Feed => {
+                Tab::Stage => {
                     self.feed_scroll_offset = 0;
                     self.feed_auto_scroll = false;
                 }
@@ -281,8 +275,7 @@ impl App {
                 self.sidebar_selected = self.agent_count.saturating_sub(1);
             }
             FocusPane::MainPanel => match self.active_tab {
-                Tab::Stage => {}
-                Tab::Feed => {
+                Tab::Stage => {
                     self.feed_scroll_offset = self.feed_count.saturating_sub(1);
                     self.feed_auto_scroll = true;
                 }

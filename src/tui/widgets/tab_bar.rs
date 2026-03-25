@@ -21,7 +21,6 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         // Indicator counts next to tab label
         let label = match tab {
             Tab::Stage => format!(" Stage ({}) ", m.total_agents),
-            Tab::Feed => format!(" Feed ({}) ", snap.feed.len()),
             Tab::Agents => format!(" Agents ({}) ", m.total_agents),
             Tab::Sessions => format!(" Sessions ({}) ", snap.sessions.len()),
         };
