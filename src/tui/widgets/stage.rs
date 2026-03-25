@@ -526,161 +526,137 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
 }
 
 fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
-    // Create a project-filtered view for feeds
     let (_proj_agents, proj_feed) = filter_snap_by_project(snap, &app.current_project);
 
-    let feed_cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-        .split(area);
-
-    render_commands_panel(f, feed_cols[0], app, snap, &proj_feed);
-    render_thinking_panel(f, feed_cols[1], app, snap, &proj_feed);
-}
-
-fn render_commands_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot, proj_feed: &[&FeedEvent]) {
-    let cmd_block = Block::default()
+    let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Rgb(35, 35, 50)))
-        .title(" commands ")
+        .title(" conversation ")
         .title_style(
             Style::default()
-                .fg(Color::Rgb(100, 180, 255))
+                .fg(Color::Rgb(180, 180, 220))
                 .add_modifier(Modifier::BOLD),
         )
         .style(Style::default().bg(CARD_BG));
 
-    // Filter for tool events with actual tool names (skip empty ToolDone)
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if inner.width < 10 || inner.height < 3 {
+        return;
+    }
+
+    // Build conversation timeline: group events by user turns
+    // user prompt → assistant text → tool calls → assistant text → ...
     let filter = &app.filter_text;
-    let cmd_events: Vec<&&FeedEvent> = proj_feed
-        .iter()
-        .filter(|e| {
-            e.tool_name.is_some()
-                && (e.event_type == RuntimeEventType::ToolStart
-                    || e.event_type == RuntimeEventType::ToolDone)
-        })
-        .filter(|e| {
-            if filter.is_empty() {
-                true
-            } else {
-                let f_lower = filter.to_lowercase();
-                e.display_name.to_lowercase().contains(&f_lower)
-                    || e.tool_name
-                        .as_deref()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .contains(&f_lower)
-                    || e.file_path
-                        .as_deref()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .contains(&f_lower)
+    let f_lower = filter.to_lowercase();
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    for event in proj_feed.iter() {
+        // Apply filter
+        if !filter.is_empty() {
+            let matches = event.display_name.to_lowercase().contains(&f_lower)
+                || event.tool_name.as_deref().unwrap_or("").to_lowercase().contains(&f_lower)
+                || event.file_path.as_deref().unwrap_or("").to_lowercase().contains(&f_lower)
+                || event.detail.as_deref().unwrap_or("").to_lowercase().contains(&f_lower);
+            if !matches { continue; }
+        }
+
+        let elapsed = format_elapsed(event.ts, snap);
+        let is_sub = is_sub_agent(event, snap);
+
+        match event.event_type {
+            // User prompt = top-level comment
+            RuntimeEventType::TurnActive => {
+                lines.push(Line::raw(""));
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(DIM)),
+                    Span::styled("\u{25b6} ", Style::default().fg(Color::Rgb(100, 200, 100))),
+                    Span::styled("user prompt", Style::default().fg(Color::Rgb(100, 200, 100)).add_modifier(Modifier::BOLD)),
+                ]));
             }
-        })
-        .collect();
 
-    // Show last N that fit
-    let inner_h = area.height.saturating_sub(2) as usize;
-    let start = cmd_events.len().saturating_sub(inner_h);
+            // Assistant text = reply (indented if sub-agent)
+            RuntimeEventType::AssistantText => {
+                let text = event.detail.as_deref().unwrap_or("");
+                if text.is_empty() { continue; }
 
-    let cmd_lines: Vec<Line> = cmd_events[start..]
-        .iter()
-        .map(|e| {
-            let elapsed = format_elapsed(e.ts, snap);
-            let who = format_who(e, snap);
-            let who_color = who_color(e, snap);
-            let tool_text = format_tool(e);
-            let tool_color = if e.is_error {
-                Color::Red
-            } else {
-                match e.event_type {
-                    RuntimeEventType::ToolStart => Color::Cyan,
-                    RuntimeEventType::ToolDone => Color::Yellow,
-                    _ => Color::White,
-                }
-            };
-            Line::from(vec![
-                Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(DIM)),
-                Span::styled(format!("{:<5} ", who), Style::default().fg(who_color)),
-                Span::styled(tool_text, Style::default().fg(tool_color)),
-            ])
-        })
-        .collect();
-
-    f.render_widget(Paragraph::new(cmd_lines).block(cmd_block).wrap(Wrap { trim: false }), area);
-}
-
-fn render_thinking_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot, proj_feed: &[&FeedEvent]) {
-    let thought_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(35, 35, 50)))
-        .title(" thinking ")
-        .title_style(
-            Style::default()
-                .fg(Color::Rgb(200, 160, 255))
-                .add_modifier(Modifier::BOLD),
-        )
-        .style(Style::default().bg(CARD_BG));
-
-    let filter = &app.filter_text;
-    let text_events: Vec<&&FeedEvent> = proj_feed
-        .iter()
-        .filter(|e| e.event_type == RuntimeEventType::AssistantText)
-        .filter(|e| {
-            if filter.is_empty() {
-                true
-            } else {
-                let f_lower = filter.to_lowercase();
-                e.display_name.to_lowercase().contains(&f_lower)
-                    || e.detail
-                        .as_deref()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .contains(&f_lower)
-            }
-        })
-        .collect();
-
-    let inner_h = area.height.saturating_sub(2) as usize;
-    let start = text_events.len().saturating_sub(inner_h);
-
-    let thought_lines: Vec<Line> = text_events[start..]
-        .iter()
-        .map(|e| {
-            let elapsed = format_elapsed(e.ts, snap);
-            let who = format_who(e, snap);
-            let text = e
-                .detail
-                .as_deref()
-                .unwrap_or("")
-                .to_string();
-
-            let text_color = if e.is_error {
-                Color::Rgb(255, 140, 140)
-            } else {
-                let is_sub = is_sub_agent(e, snap);
-                if is_sub {
-                    Color::Rgb(160, 180, 200)
+                let (indent, icon, color) = if is_sub {
+                    ("  ", "\u{2514}\u{1f423} ", Color::Rgb(160, 180, 200))
                 } else {
-                    Color::Rgb(180, 160, 220)
-                }
-            };
+                    (" ", "\u{1f414} ", Color::Rgb(180, 170, 220))
+                };
 
-            let prefix = if is_sub_agent(e, snap) {
-                format!("\u{2514}{}: ", who)
-            } else {
-                String::new()
-            };
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(DIM)),
+                    Span::styled(indent, Style::default()),
+                    Span::styled(icon, Style::default().fg(color)),
+                    Span::styled(text.to_string(), Style::default().fg(color)),
+                ]));
+            }
 
-            Line::from(vec![
-                Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(DIM)),
-                Span::styled(prefix, Style::default().fg(text_color)),
-                Span::styled(text, Style::default().fg(text_color)),
-            ])
-        })
-        .collect();
+            // Tool use = indented action
+            RuntimeEventType::ToolStart => {
+                if event.tool_name.is_none() { continue; }
+                let tool_text = format_tool(event);
+                let (indent, prefix) = if is_sub {
+                    ("    ", "\u{2514} ")
+                } else {
+                    ("  ", "")
+                };
 
-    f.render_widget(Paragraph::new(thought_lines).block(thought_block).wrap(Wrap { trim: false }), area);
+                let tool_color = match event.tool_name.as_deref().unwrap_or("") {
+                    "Read" | "Grep" | "Glob" => Color::Cyan,
+                    "Edit" | "Write" => Color::Yellow,
+                    "Bash" => Color::Red,
+                    "Task" | "TaskCreate" | "TaskUpdate" => Color::Magenta,
+                    _ => Color::White,
+                };
+
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(DIM)),
+                    Span::styled(indent, Style::default()),
+                    Span::styled(prefix, Style::default().fg(DIM)),
+                    Span::styled("\u{2699} ", Style::default().fg(tool_color)),
+                    Span::styled(tool_text, Style::default().fg(tool_color)),
+                ]));
+            }
+
+            // ToolDone with tool_name
+            RuntimeEventType::ToolDone if event.tool_name.is_some() => {
+                let tool_text = format_tool(event);
+                let indent = if is_sub { "    " } else { "  " };
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(DIM)),
+                    Span::styled(indent, Style::default()),
+                    Span::styled("\u{2713} ", Style::default().fg(Color::Rgb(80, 180, 80))),
+                    Span::styled(tool_text, Style::default().fg(DIM)),
+                ]));
+            }
+
+            // Waiting/permission
+            RuntimeEventType::PermissionWait => {
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(DIM)),
+                    Span::styled(" \u{23f3} ", Style::default().fg(Color::Rgb(255, 200, 80))),
+                    Span::styled("waiting for permission...", Style::default().fg(Color::Rgb(255, 200, 80))),
+                ]));
+            }
+
+            _ => {}
+        }
+    }
+
+    // Show last N lines that fit
+    let max_lines = inner.height as usize;
+    let start = lines.len().saturating_sub(max_lines);
+    let visible: Vec<Line> = lines[start..].to_vec();
+
+    f.render_widget(
+        Paragraph::new(visible).wrap(Wrap { trim: false }).style(Style::default().bg(CARD_BG)),
+        inner,
+    );
 }
 
 // --- Helpers ---
