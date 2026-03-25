@@ -91,7 +91,7 @@ impl AppStore {
         }
 
         if let Some(tokens) = raw.total_tokens {
-            agent.total_tokens += tokens; // accumulate from each event
+            agent.total_tokens = agent.total_tokens.max(tokens); // keep highest seen
         }
 
         if let Some(s) = skill {
