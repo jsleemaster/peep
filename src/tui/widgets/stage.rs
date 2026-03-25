@@ -491,16 +491,15 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 let text = event.detail.as_deref().unwrap_or("");
                 if text.is_empty() { continue; }
 
-                let line_color = Color::Rgb(50, 50, 70);
                 let (tree, icon, color) = if is_sub {
-                    ("\u{2502} \u{251c}\u{2500}", "\u{1f423} ", theme().sub_agent_text)
+                    ("    ", "\u{1f423} ", theme().sub_agent_text)
                 } else {
-                    ("\u{251c}\u{2500}", "\u{1f414} ", theme().assistant_text)
+                    ("  ", "\u{1f414} ", theme().assistant_text)
                 };
 
                 lines.push(Line::from(vec![
                     Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(dim())),
-                    Span::styled(tree, Style::default().fg(line_color)),
+                    Span::styled(tree, Style::default()),
                     Span::styled(icon, Style::default().fg(color)),
                     Span::styled(text.to_string(), Style::default().fg(color)),
                 ]));
@@ -511,9 +510,9 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 if event.tool_name.is_none() { continue; }
                 let tool_text = format_tool(event);
                 let tree = if is_sub {
-                    "\u{2502} \u{2502} \u{251c}\u{2500}"
+                    "      "
                 } else {
-                    "\u{2502} \u{251c}\u{2500}"
+                    "    "
                 };
 
                 let tool_color = match event.tool_name.as_deref().unwrap_or("") {
@@ -524,10 +523,9 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                     _ => Color::White,
                 };
 
-                let line_color = Color::Rgb(50, 50, 70);
                 lines.push(Line::from(vec![
                     Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(dim())),
-                    Span::styled(tree, Style::default().fg(line_color)),
+                    Span::styled(tree, Style::default()),
                     Span::styled("\u{2699} ", Style::default().fg(tool_color)),
                     Span::styled(tool_text, Style::default().fg(tool_color)),
                 ]));
@@ -536,15 +534,10 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
             // ToolDone with tool_name
             RuntimeEventType::ToolDone if event.tool_name.is_some() => {
                 let tool_text = format_tool(event);
-                let tree = if is_sub {
-                    "\u{2502} \u{2502} \u{2514}\u{2500}"
-                } else {
-                    "\u{2502} \u{2514}\u{2500}"
-                };
-                let line_color = Color::Rgb(50, 50, 70);
+                let tree = if is_sub { "      " } else { "    " };
                 lines.push(Line::from(vec![
                     Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(dim())),
-                    Span::styled(tree, Style::default().fg(line_color)),
+                    Span::styled(tree, Style::default()),
                     Span::styled("\u{2713} ", Style::default().fg(theme().tool_done)),
                     Span::styled(tool_text, Style::default().fg(dim())),
                 ]));
