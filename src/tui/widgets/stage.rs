@@ -157,12 +157,18 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         y += 1;
 
         let tw = (bw - 4) as usize;
-        let dt: String = if bubble_text.len() > tw {
-            format!("{}...", &bubble_text[..tw.saturating_sub(3)])
-        } else {
-            bubble_text
+        let dt: String = {
+            let chars: Vec<char> = bubble_text.chars().collect();
+            if chars.len() > tw {
+                let truncated: String = chars[..tw.saturating_sub(3)].iter().collect();
+                format!("{}...", truncated)
+            } else {
+                bubble_text
+            }
         };
-        let content = format!("\u{2502} {:<w$} \u{2502}", dt, w = tw);
+        let display_w = dt.chars().count();
+        let pad = tw.saturating_sub(display_w);
+        let content = format!("\u{2502} {}{} \u{2502}", dt, " ".repeat(pad));
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 content,
