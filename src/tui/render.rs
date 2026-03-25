@@ -42,24 +42,20 @@ impl StoreSnapshot {
 pub fn draw(f: &mut Frame, app: &App, snap: &StoreSnapshot) {
     let size = f.area();
 
-    // Main layout: tab bar (3) | body (fill) | status bar (2)
+    // Main layout: header (2) | body (fill)
     let outer_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Fill(1),
             Constraint::Length(2),
+            Constraint::Fill(1),
         ])
         .split(size);
 
-    // Tab bar
+    // Header (packmen + stats)
     tab_bar::render_tab_bar(f, outer_chunks[0], app, snap);
 
     // Single view: stage
     stage::render_stage(f, outer_chunks[1], app, snap);
-
-    // Status bar
-    status_bar::render_status_bar(f, outer_chunks[2], app, snap);
 
     // Filter overlay
     if app.show_filter {

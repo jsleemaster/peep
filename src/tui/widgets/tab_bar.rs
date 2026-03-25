@@ -6,38 +6,67 @@ use ratatui::{
     Frame,
 };
 
+use crate::protocol::types::AgentState;
+use crate::store::state::AppStore;
 use crate::tui::app::App;
 use crate::tui::render::StoreSnapshot;
-use crate::store::state::AppStore;
+use crate::tui::widgets::stage;
 
 pub fn render_tab_bar(f: &mut Frame, area: Rect, _app: &App, snap: &StoreSnapshot) {
     let m = &snap.metrics;
 
-    let mut spans = vec![
-        Span::styled(" packmen ", Style::default().fg(Color::Rgb(255, 220, 50)).add_modifier(Modifier::BOLD)),
-        Span::styled(" \u{2502} ", Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("agents:{} ", m.total_agents), Style::default().fg(Color::Rgb(140, 140, 160))),
-        Span::styled(format!("\u{25cf}{} ", m.active_agents), Style::default().fg(Color::Green)),
-        Span::styled(format!("\u{25d0}{}", m.waiting_agents), Style::default().fg(Color::Yellow)),
-        Span::styled(" \u{2502} ", Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("tokens:{} ", AppStore::format_tokens(m.total_tokens)), Style::default().fg(Color::Rgb(140, 140, 160))),
-        Span::styled(" \u{2502} ", Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("${:.2}", m.total_cost), Style::default().fg(Color::Rgb(100, 220, 140))),
+    // Line 1: packmen title
+    // Line 2: stats (agents, party, tokens, cost, keybindings)
+    let title_line = Line::from(vec![
+        Span::styled(" packmen", Style::default().fg(Color::Rgb(255, 220, 50)).add_modifier(Modifier::BOLD)),
+    ]);
+
+    let active_count = snap.agents.iter().filter(|a| a.state == AgentState::Active).count();
+    let waiting_count = snap.agents.iter().filter(|a| a.state == AgentState::Waiting).count();
+    let party_summary = if !snap.agents.is_empty() {
+        stage::party_summary(snap)
+    } else {
+        String::new()
+    };
+
+    let sep = Span::styled(" \u{2502} ", Style::default().fg(Color::Rgb(50, 50, 70)));
+
+    let mut stats = vec![
+        Span::styled(" ", Style::default()),
+        Span::styled(format!("\u{25cf}{}", active_count), Style::default().fg(Color::Green)),
+        Span::raw(" "),
+        Span::styled(format!("\u{25d0}{}", waiting_count), Style::default().fg(Color::Yellow)),
     ];
 
-    // Right-aligned: keybindings hint
+    if !party_summary.is_empty() {
+        stats.push(sep.clone());
+        stats.push(Span::styled(party_summary, Style::default().fg(Color::Rgb(180, 180, 200))));
+    }
+
+    stats.push(sep.clone());
+    stats.push(Span::styled(
+        format!("tokens:{}", AppStore::format_tokens(m.total_tokens)),
+        Style::default().fg(Color::Rgb(140, 140, 160)),
+    ));
+
+    stats.push(sep.clone());
+    stats.push(Span::styled(
+        format!("${:.2}", m.total_cost),
+        Style::default().fg(Color::Rgb(100, 220, 140)),
+    ));
+
+    // Right-aligned keybindings
     let hint = "q:quit j/k:scroll [,]:project";
-    let left_len: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+    let left_len: usize = stats.iter().map(|s| s.content.chars().count()).sum();
     let padding = (area.width as usize).saturating_sub(left_len + hint.chars().count() + 2);
-    spans.push(Span::raw(" ".repeat(padding)));
-    spans.push(Span::styled(hint, Style::default().fg(Color::Rgb(120, 120, 150))));
-    spans.push(Span::raw(" "));
+    stats.push(Span::raw(" ".repeat(padding)));
+    stats.push(Span::styled(hint, Style::default().fg(Color::Rgb(80, 80, 110))));
 
-    let line = Line::from(spans);
+    let stats_line = Line::from(stats);
+
     let block = Block::default()
-        .borders(Borders::BOTTOM)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .borders(Borders::NONE);
 
-    let paragraph = Paragraph::new(line).block(block);
+    let paragraph = Paragraph::new(vec![title_line, stats_line]).block(block);
     f.render_widget(paragraph, area);
 }
