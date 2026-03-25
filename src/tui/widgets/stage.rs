@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
 
@@ -231,27 +231,40 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         y += 1;
 
         let tw = (bw - 4) as usize;
-        let dt: String = {
-            let chars: Vec<char> = bubble_text.chars().collect();
-            if chars.len() > tw {
-                let truncated: String = chars[..tw.saturating_sub(3)].iter().collect();
-                format!("{}...", truncated)
+        // Wrap bubble text into multiple lines (max 3)
+        let chars: Vec<char> = bubble_text.chars().collect();
+        let mut lines_text: Vec<String> = Vec::new();
+        let mut pos = 0;
+        while pos < chars.len() && lines_text.len() < 3 {
+            let end = (pos + tw).min(chars.len());
+            let line_chars: String = chars[pos..end].iter().collect();
+            if end < chars.len() && lines_text.len() == 2 {
+                // Last line, truncate
+                let trunc: String = chars[pos..(pos + tw).min(chars.len()).saturating_sub(3)].iter().collect();
+                lines_text.push(format!("{}...", trunc));
             } else {
-                bubble_text
+                lines_text.push(line_chars);
             }
-        };
-        let display_w = dt.chars().count();
-        let pad = tw.saturating_sub(display_w);
-        let content = format!("\u{2502} {}{} \u{2502}", dt, " ".repeat(pad));
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                content,
-                Style::default().fg(Color::Rgb(180, 180, 210)),
-            )))
-            .style(Style::default().bg(BUBBLE_BG)),
-            Rect::new(bx, y, bw, 1),
-        );
-        y += 1;
+            pos = end;
+        }
+        if lines_text.is_empty() {
+            lines_text.push("...".to_string());
+        }
+
+        for line_text in &lines_text {
+            let display_w = line_text.chars().count();
+            let pad = tw.saturating_sub(display_w);
+            let content = format!("\u{2502} {}{} \u{2502}", line_text, " ".repeat(pad));
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    content,
+                    Style::default().fg(Color::Rgb(180, 180, 210)),
+                )))
+                .style(Style::default().bg(BUBBLE_BG)),
+                Rect::new(bx, y, bw, 1),
+            );
+            y += 1;
+        }
 
         let btm_b = format!(
             "\u{2570}{}\u{256f}",
@@ -594,7 +607,7 @@ fn render_commands_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnaps
         })
         .collect();
 
-    f.render_widget(Paragraph::new(cmd_lines).block(cmd_block), area);
+    f.render_widget(Paragraph::new(cmd_lines).block(cmd_block).wrap(Wrap { trim: false }), area);
 }
 
 fn render_thinking_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot, proj_feed: &[&FeedEvent]) {
@@ -640,9 +653,7 @@ fn render_thinking_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnaps
                 .detail
                 .as_deref()
                 .unwrap_or("")
-                .chars()
-                .take(60)
-                .collect::<String>();
+                .to_string();
 
             let text_color = if e.is_error {
                 Color::Rgb(255, 140, 140)
@@ -669,7 +680,7 @@ fn render_thinking_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnaps
         })
         .collect();
 
-    f.render_widget(Paragraph::new(thought_lines).block(thought_block), area);
+    f.render_widget(Paragraph::new(thought_lines).block(thought_block).wrap(Wrap { trim: false }), area);
 }
 
 // --- Helpers ---
