@@ -99,7 +99,6 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) 
                 tab_spans.push(Span::styled(" \u{2502} ", Style::default().fg(Color::Rgb(40, 40, 55)).bg(BG)));
             }
         }
-        tab_spans.push(Span::styled("  [,] switch", Style::default().fg(Color::Rgb(130, 130, 160)).bg(BG)));
         f.render_widget(Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(BG)), chunks[0]);
     }
 
