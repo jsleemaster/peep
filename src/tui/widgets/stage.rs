@@ -226,9 +226,9 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     // Leader stats: HP bar (100% = full health, decreases as context fills up)
     if y < li.y + li.height {
         let used_pct = leader.context_percent.unwrap_or_else(|| {
-            // Rough estimate: assume 200k token context
+            // Estimate from tokens: assume 1M context window
             if leader.total_tokens > 0 {
-                ((leader.total_tokens as f64 / 200_000.0) * 100.0).min(100.0)
+                ((leader.total_tokens as f64 / 1_000_000.0) * 100.0).min(100.0)
             } else {
                 0.0
             }

@@ -44,15 +44,15 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
         .map(|dt| dt.timestamp())
         .unwrap_or_else(|| chrono::Utc::now().timestamp());
 
-    // Extract token usage from assistant messages: message.usage
-    // Use input_tokens + output_tokens (NOT cache_read — that's just cache hits)
+    // Extract context size from assistant messages: message.usage
+    // cache_read_input_tokens ≈ total conversation history size (context window usage)
     let total_tokens = v
         .get("message")
         .and_then(|m| m.get("usage"))
         .and_then(|u| {
+            let cache = u.get("cache_read_input_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
             let input = u.get("input_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
-            let output = u.get("output_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
-            let total = input + output;
+            let total = cache + input;
             if total > 0 { Some(total) } else { None }
         });
 
