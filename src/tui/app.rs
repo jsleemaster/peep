@@ -306,27 +306,23 @@ impl App {
             self.project_index = 0;
             return;
         }
-        // Auto-select first project if none selected
-        if self.current_project.is_none() && !projects.is_empty() {
-            self.project_index = 0;
-            self.current_project = Some(projects[0].clone());
-        }
-        // Ensure index is valid
+        // Wrap index if out of bounds
         if self.project_index >= projects.len() {
-            self.project_index = 0;
-            self.current_project = projects.first().cloned();
+            self.project_index = self.project_index % projects.len();
         }
+        // Resolve project from index
+        self.current_project = Some(projects[self.project_index].clone());
     }
 
     fn next_project(&mut self) {
-        // Will be applied on next update_projects call
         self.project_index = self.project_index.wrapping_add(1);
-        // Actual project switch happens in update_projects
-        self.current_project = None; // force re-resolve
     }
 
     fn prev_project(&mut self) {
-        self.project_index = self.project_index.wrapping_sub(1);
-        self.current_project = None;
+        if self.project_index == 0 {
+            self.project_index = usize::MAX; // will wrap in update_projects
+        } else {
+            self.project_index -= 1;
+        }
     }
 }
