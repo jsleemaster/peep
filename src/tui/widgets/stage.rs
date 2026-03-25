@@ -99,7 +99,7 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) 
                 tab_spans.push(Span::styled(" \u{2502} ", Style::default().fg(Color::Rgb(40, 40, 55)).bg(BG)));
             }
         }
-        tab_spans.push(Span::styled("  [,] switch", Style::default().fg(Color::Rgb(90, 90, 110)).bg(BG)));
+        tab_spans.push(Span::styled("  [,] switch", Style::default().fg(Color::Rgb(130, 130, 160)).bg(BG)));
         f.render_widget(Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(BG)), chunks[0]);
     }
 
@@ -116,7 +116,7 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) 
 fn render_empty_party(f: &mut Frame, area: Rect, port: u16) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(40, 40, 55)))
+        .border_style(Style::default().fg(Color::Rgb(50, 50, 70)))
         .style(Style::default().bg(CARD_BG));
 
     let lines = vec![
@@ -156,7 +156,7 @@ fn render_empty_party(f: &mut Frame, area: Rect, port: u16) {
 fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
     let left_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(40, 40, 55)))
+        .border_style(Style::default().fg(Color::Rgb(50, 50, 70)))
         .style(Style::default().bg(CARD_BG));
     let li = left_block.inner(area);
     f.render_widget(left_block, area);
@@ -440,7 +440,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(35, 35, 50)))
+        .border_style(Style::default().fg(Color::Rgb(50, 50, 70)))
         .title(" conversation ")
         .title_style(
             Style::default()

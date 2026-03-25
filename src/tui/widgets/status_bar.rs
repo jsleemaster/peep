@@ -38,36 +38,20 @@ pub fn render_status_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnaps
 
         let spans = vec![
             Span::raw(" "),
-            Span::styled("party:", Style::default().fg(Color::DarkGray)),
+            Span::styled("party: ", Style::default().fg(Color::Rgb(120, 120, 150))),
             Span::styled(
-                format!("{} ", snap.agents.len()),
-                Style::default().fg(Color::White),
+                format!("{}", summary),
+                Style::default().fg(Color::Rgb(180, 180, 200)),
             ),
+            Span::styled(" \u{2502} ", Style::default().fg(Color::Rgb(50, 50, 70))),
             Span::styled(
-                format!("({})", summary),
-                Style::default().fg(Color::DarkGray),
-            ),
-            sep.clone(),
-            Span::styled(
-                format!("\u{25cf}{}", active_count),
+                format!("\u{25cf}{} active", active_count),
                 Style::default().fg(Color::Green),
             ),
-            Span::raw(" "),
+            Span::raw("  "),
             Span::styled(
-                format!("\u{25d0}{}", waiting_count),
+                format!("\u{25d0}{} waiting", waiting_count),
                 Style::default().fg(Color::Yellow),
-            ),
-            sep.clone(),
-            Span::styled("tokens:", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                AppStore::format_tokens(m.total_tokens),
-                Style::default().fg(Color::White),
-            ),
-            sep.clone(),
-            Span::styled("cost:", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!("${:.2}", m.total_cost),
-                Style::default().fg(Color::Rgb(255, 220, 80)),
             ),
         ];
 

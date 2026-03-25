@@ -26,11 +26,11 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, _app: &App, snap: &StoreSnapsho
     ];
 
     // Right-aligned: keybindings hint
-    let hint = "q:quit j/k:scroll [,]:project h/l:focus";
+    let hint = "q:quit j/k:scroll [,]:project";
     let left_len: usize = spans.iter().map(|s| s.content.chars().count()).sum();
     let padding = (area.width as usize).saturating_sub(left_len + hint.chars().count() + 2);
     spans.push(Span::raw(" ".repeat(padding)));
-    spans.push(Span::styled(hint, Style::default().fg(Color::Rgb(60, 60, 80))));
+    spans.push(Span::styled(hint, Style::default().fg(Color::Rgb(120, 120, 150))));
     spans.push(Span::raw(" "));
 
     let line = Line::from(spans);
