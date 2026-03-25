@@ -59,7 +59,6 @@ pub fn draw(f: &mut Frame, app: &App, snap: &StoreSnapshot) {
     match app.active_tab {
         Tab::Stage => stage::render_stage(f, outer_chunks[1], app, snap),
         Tab::Agents => render_agents_tab(f, outer_chunks[1], app, snap),
-        Tab::Sessions => session_table::render_session_table(f, outer_chunks[1], app, snap),
     }
 
     // Status bar

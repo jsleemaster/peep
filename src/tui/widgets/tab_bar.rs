@@ -22,7 +22,6 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         let label = match tab {
             Tab::Stage => format!(" Stage ({}) ", m.total_agents),
             Tab::Agents => format!(" Agents ({}) ", m.total_agents),
-            Tab::Sessions => format!(" Sessions ({}) ", snap.sessions.len()),
         };
 
         let style = if is_active {

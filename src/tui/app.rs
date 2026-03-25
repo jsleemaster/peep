@@ -6,7 +6,6 @@ use crate::tui::sprites::stage_state::StageState;
 pub enum Tab {
     Stage,
     Agents,
-    Sessions,
 }
 
 impl Tab {
@@ -15,12 +14,11 @@ impl Tab {
         match self {
             Tab::Stage => "Stage",
             Tab::Agents => "Agents",
-            Tab::Sessions => "Sessions",
         }
     }
 
     pub fn all() -> &'static [Tab] {
-        &[Tab::Stage, Tab::Agents, Tab::Sessions]
+        &[Tab::Stage, Tab::Agents]
     }
 }
 
@@ -150,7 +148,6 @@ impl App {
             KeyCode::BackTab => self.prev_tab(),
             KeyCode::Char('1') => self.active_tab = Tab::Stage,
             KeyCode::Char('2') => self.active_tab = Tab::Agents,
-            KeyCode::Char('3') => self.active_tab = Tab::Sessions,
 
             // Focus switching
             KeyCode::Char('h') | KeyCode::Left => self.focus = FocusPane::Sidebar,
@@ -186,17 +183,12 @@ impl App {
     fn next_tab(&mut self) {
         self.active_tab = match self.active_tab {
             Tab::Stage => Tab::Agents,
-            Tab::Agents => Tab::Sessions,
-            Tab::Sessions => Tab::Stage,
+            Tab::Agents => Tab::Stage,
         };
     }
 
     fn prev_tab(&mut self) {
-        self.active_tab = match self.active_tab {
-            Tab::Stage => Tab::Sessions,
-            Tab::Agents => Tab::Stage,
-            Tab::Sessions => Tab::Agents,
-        };
+        self.next_tab(); // only 2 tabs, same as next
     }
 
     fn scroll_down(&mut self) {
@@ -217,10 +209,10 @@ impl App {
                         self.feed_auto_scroll = true;
                     }
                 }
-                Tab::Sessions => {
-                    let max = self.session_count.saturating_sub(1);
-                    if self.session_scroll_offset < max {
-                        self.session_scroll_offset += 1;
+                Tab::Agents => {
+                    let max = self.agent_count.saturating_sub(1);
+                    if self.agents_tab_selected < max {
+                        self.agents_tab_selected += 1;
                     }
                 }
                 Tab::Agents => {
@@ -245,8 +237,8 @@ impl App {
                         self.feed_auto_scroll = false;
                     }
                 }
-                Tab::Sessions => {
-                    self.session_scroll_offset = self.session_scroll_offset.saturating_sub(1);
+                Tab::Agents => {
+                    self.agents_tab_selected = self.agents_tab_selected.saturating_sub(1);
                 }
                 Tab::Agents => {
                     self.agents_tab_selected = self.agents_tab_selected.saturating_sub(1);
@@ -263,7 +255,6 @@ impl App {
                     self.feed_scroll_offset = 0;
                     self.feed_auto_scroll = false;
                 }
-                Tab::Sessions => self.session_scroll_offset = 0,
                 Tab::Agents => self.agents_tab_selected = 0,
             },
         }
@@ -278,9 +269,6 @@ impl App {
                 Tab::Stage => {
                     self.feed_scroll_offset = self.feed_count.saturating_sub(1);
                     self.feed_auto_scroll = true;
-                }
-                Tab::Sessions => {
-                    self.session_scroll_offset = self.session_count.saturating_sub(1);
                 }
                 Tab::Agents => {
                     self.agents_tab_selected = self.agent_count.saturating_sub(1);
