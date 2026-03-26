@@ -55,10 +55,13 @@ impl AppStore {
 
         // Upsert agent
         let agent = self.agents.entry(agent_id.clone()).or_insert_with(|| {
-            // Sub-agents: use detail (description) as name
+            // Sub-agents: use description part (before |) as name
             // Others: slug > session_runtime_id > short_id
             let display_name = if raw.hook_event_name.as_deref() == Some("AgentSpawn") {
-                raw.detail.clone().unwrap_or_else(|| short_id.clone())
+                raw.detail.as_deref()
+                    .and_then(|d| d.split(" | ").next())
+                    .unwrap_or(&short_id)
+                    .to_string()
             } else {
                 raw.slug.clone()
                     .or_else(|| raw.session_runtime_id.clone())
