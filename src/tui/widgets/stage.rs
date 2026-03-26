@@ -259,9 +259,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         Paragraph::new(name_line).style(Style::default().bg(card_bg())),
         Rect::new(li.x, y, li.width, 1),
     );
-    y += 1;
-
-    // (leader bubble removed — conversation panel shows it)
+    y += 2; // padding after name
 
     // Chicken sprite (leader is always a chicken)
     let tick = app.tick;
@@ -283,7 +281,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             );
         }
     }
-    y += chicken_lines.len() as u16;
+    y += chicken_lines.len() as u16 + 1; // padding after chicken
 
     // Leader stats: HP bar (100% = full health, decreases as context fills up)
     if y < li.y + li.height {
@@ -600,7 +598,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 let mut spans = vec![
                     Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
                     Span::styled(tree, Style::default().fg(border())),
-                    Span::styled("\u{2b24} ", Style::default().fg(theme().accent_yellow)), // orange dot = in progress
+                    Span::styled(" \u{2b24} ", Style::default().fg(theme().accent_yellow)), // orange dot = in progress
                     Span::styled(tool_text, Style::default().fg(tool_color)),
                 ];
                 if let Some(ai) = event.ai_tool.as_deref() {
@@ -621,9 +619,9 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                     " \u{2502} \u{2514}\u{2500}"
                 };
                 let (dot, dot_color) = if event.is_error {
-                    ("\u{2b24} ", theme().accent_red) // red dot = error
+                    (" \u{2b24} ", theme().accent_red) // red dot = error
                 } else {
-                    ("\u{2b24} ", theme().accent_green) // green dot = success
+                    (" \u{2b24} ", theme().accent_green) // green dot = success
                 };
                 lines.push(Line::from(vec![
                     Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
