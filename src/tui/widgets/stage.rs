@@ -113,13 +113,106 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) 
 }
 
 fn render_empty_party(f: &mut Frame, area: Rect, _port: u16) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border()))
-        .style(Style::default().bg(card_bg()));
+    // Fill background
+    f.render_widget(
+        Paragraph::new("").style(Style::default().bg(card_bg())),
+        area,
+    );
 
-    let paragraph = Paragraph::new("").block(block);
-    f.render_widget(paragraph, area);
+    let tick = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as usize;
+
+    // Animated chicken sprite (alternates idle/peck)
+    let chicken_pixels = if (tick / 600) % 2 == 0 {
+        chicken::chicken_idle(tick / 150)
+    } else {
+        chicken::chicken_peck(tick / 150)
+    };
+    let chicken_lines = sprite_to_lines(&chicken_pixels, card_bg());
+
+    // Center everything
+    let content_height = chicken_lines.len() as u16 + 10; // sprite + text
+    let start_y = area.y + area.height.saturating_sub(content_height) / 2;
+    let center_x = area.x + area.width / 2;
+
+    // Draw chicken centered
+    let sprite_w = 28u16; // 14px * 2
+    let sprite_x = center_x.saturating_sub(sprite_w / 2);
+    for (j, line) in chicken_lines.iter().enumerate() {
+        let y = start_y + j as u16;
+        if y < area.y + area.height {
+            f.render_widget(
+                Paragraph::new(line.clone()).style(Style::default().bg(card_bg())),
+                Rect::new(sprite_x, y, sprite_w, 1),
+            );
+        }
+    }
+
+    let text_y = start_y + chicken_lines.len() as u16 + 1;
+    let t = theme();
+
+    // Title
+    if text_y < area.y + area.height {
+        let title = Line::from(vec![
+            Span::styled("peep", Style::default().fg(t.brand).add_modifier(Modifier::BOLD)),
+            Span::styled(" — AI agent monitor", Style::default().fg(t.text_dim)),
+        ]);
+        let title_w = 30u16;
+        f.render_widget(
+            Paragraph::new(title).style(Style::default().bg(card_bg())),
+            Rect::new(center_x.saturating_sub(title_w / 2), text_y, title_w, 1),
+        );
+    }
+
+    // Subtitle
+    let sub_y = text_y + 2;
+    if sub_y < area.y + area.height {
+        let sub = Line::from(Span::styled(
+            "Start any AI coding tool to begin",
+            Style::default().fg(t.text_dim),
+        ));
+        let sub_w = 40u16;
+        f.render_widget(
+            Paragraph::new(sub).style(Style::default().bg(card_bg())),
+            Rect::new(center_x.saturating_sub(sub_w / 2), sub_y, sub_w, 1),
+        );
+    }
+
+    // Supported tools
+    let tools_y = sub_y + 2;
+    if tools_y < area.y + area.height {
+        let tools = Line::from(vec![
+            Span::styled("Claude", Style::default().fg(t.ai_claude)),
+            Span::styled(" · ", Style::default().fg(t.text_dim)),
+            Span::styled("Codex", Style::default().fg(t.ai_codex)),
+            Span::styled(" · ", Style::default().fg(t.text_dim)),
+            Span::styled("Gemini", Style::default().fg(t.ai_gemini)),
+            Span::styled(" · ", Style::default().fg(t.text_dim)),
+            Span::styled("OpenCode", Style::default().fg(t.ai_opencode)),
+        ]);
+        let tools_w = 40u16;
+        f.render_widget(
+            Paragraph::new(tools).style(Style::default().bg(card_bg())),
+            Rect::new(center_x.saturating_sub(tools_w / 2), tools_y, tools_w, 1),
+        );
+    }
+
+    // Dots animation
+    let dots_y = tools_y + 2;
+    if dots_y < area.y + area.height {
+        let dot_count = ((tick / 500) % 4) as usize;
+        let dots = ".".repeat(dot_count);
+        let waiting = format!("waiting{:<3}", dots);
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                waiting,
+                Style::default().fg(t.text_dim),
+            ))).style(Style::default().bg(card_bg())),
+            Rect::new(center_x.saturating_sub(6), dots_y, 12, 1),
+        );
+    }
 }
 
 fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
