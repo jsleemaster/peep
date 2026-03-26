@@ -112,43 +112,13 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) 
     render_right_panel(f, main[1], app, snap);
 }
 
-fn render_empty_party(f: &mut Frame, area: Rect, port: u16) {
+fn render_empty_party(f: &mut Frame, area: Rect, _port: u16) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border()))
         .style(Style::default().bg(card_bg()));
 
-    let lines = vec![
-        Line::raw(""),
-        Line::raw(""),
-        Line::from(Span::styled(
-            format!("  Waiting for events on :{} ...", port),
-            Style::default().fg(dim()),
-        )),
-        Line::raw(""),
-        Line::from(Span::styled(
-            "  The party is empty. Send hook events to hatch some chickens!",
-            Style::default().fg(dim()),
-        )),
-        Line::raw(""),
-        Line::from(Span::styled(
-            format!(
-                "  curl -s -X POST http://localhost:{}/hook \\",
-                port
-            ),
-            Style::default().fg(Color::Cyan),
-        )),
-        Line::from(Span::styled(
-            "    -H 'Content-Type: application/json' \\",
-            Style::default().fg(Color::Cyan),
-        )),
-        Line::from(Span::styled(
-            "    -d '{\"hook_event_name\":\"PostToolUse\",\"session_id\":\"test\",\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"src/main.rs\"}}'",
-            Style::default().fg(Color::Cyan),
-        )),
-    ];
-
-    let paragraph = Paragraph::new(lines).block(block);
+    let paragraph = Paragraph::new("").block(block);
     f.render_widget(paragraph, area);
 }
 
