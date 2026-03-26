@@ -75,3 +75,90 @@ jobs:
         with:
           generate_release_notes: true
           files: artifacts/**/*.tar.gz
+
+  update-homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Download release artifacts and compute sha256
+        id: sha
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          BASE="https://github.com/jsleemaster/peep/releases/download/v${VERSION}"
+
+          curl -sL "${BASE}/peep-macos-arm64.tar.gz" -o macos-arm64.tar.gz
+          curl -sL "${BASE}/peep-macos-intel.tar.gz" -o macos-intel.tar.gz
+          curl -sL "${BASE}/peep-linux-x86_64.tar.gz" -o linux-x86_64.tar.gz
+          curl -sL "${BASE}/peep-linux-arm64.tar.gz" -o linux-arm64.tar.gz
+
+          echo "macos_arm64=$(sha256sum macos-arm64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "macos_intel=$(sha256sum macos-intel.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "linux_x86_64=$(sha256sum linux-x86_64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "linux_arm64=$(sha256sum linux-arm64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: jsleemaster/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Formula
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          cat > homebrew-tap/Formula/peep.rb << 'FORMULA'
+          class Peep < Formula
+            desc "Peep into your AI coding agents — terminal dashboard with pixel-art characters"
+            homepage "https://github.com/jsleemaster/peep"
+            version "VERSION_PLACEHOLDER"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/jsleemaster/peep/releases/download/v#{version}/peep-macos-arm64.tar.gz"
+                sha256 "SHA_MACOS_ARM64"
+              else
+                url "https://github.com/jsleemaster/peep/releases/download/v#{version}/peep-macos-intel.tar.gz"
+                sha256 "SHA_MACOS_INTEL"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/jsleemaster/peep/releases/download/v#{version}/peep-linux-arm64.tar.gz"
+                sha256 "SHA_LINUX_ARM64"
+              else
+                url "https://github.com/jsleemaster/peep/releases/download/v#{version}/peep-linux-x86_64.tar.gz"
+                sha256 "SHA_LINUX_X86_64"
+              end
+            end
+
+            def install
+              bin.install "peep"
+            end
+
+            test do
+              assert_match "Peep", shell_output("#{bin}/peep --help")
+            end
+          end
+          FORMULA
+
+          # Replace placeholders
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/" homebrew-tap/Formula/peep.rb
+          sed -i "s/SHA_MACOS_ARM64/${{ steps.sha.outputs.macos_arm64 }}/" homebrew-tap/Formula/peep.rb
+          sed -i "s/SHA_MACOS_INTEL/${{ steps.sha.outputs.macos_intel }}/" homebrew-tap/Formula/peep.rb
+          sed -i "s/SHA_LINUX_X86_64/${{ steps.sha.outputs.linux_x86_64 }}/" homebrew-tap/Formula/peep.rb
+          sed -i "s/SHA_LINUX_ARM64/${{ steps.sha.outputs.linux_arm64 }}/" homebrew-tap/Formula/peep.rb
+
+      - name: Push to homebrew-tap
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/peep.rb
+          git commit -m "peep ${{ steps.version.outputs.version }}" || exit 0
+          git push
