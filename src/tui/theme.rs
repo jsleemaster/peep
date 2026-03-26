@@ -152,12 +152,12 @@ impl Theme {
 }
 
 /// Global theme access. Set once at startup.
-static mut THEME: Option<Theme> = None;
+static THEME: std::sync::OnceLock<Theme> = std::sync::OnceLock::new();
 
 pub fn init_theme(theme: Theme) {
-    unsafe { THEME = Some(theme); }
+    THEME.set(theme).expect("theme already initialized");
 }
 
 pub fn theme() -> &'static Theme {
-    unsafe { THEME.as_ref().expect("theme not initialized") }
+    THEME.get().expect("theme not initialized")
 }

@@ -120,9 +120,9 @@ pub fn parse_hook_payload(body: &Value) -> Option<RawIngestEvent> {
         ],
     )
     .map(|s| {
-        // Truncate long details
-        if s.len() > 200 {
-            format!("{}...", &s[..197])
+        let chars: Vec<char> = s.chars().take(201).collect();
+        if chars.len() > 200 {
+            format!("{}...", chars[..197].iter().collect::<String>())
         } else {
             s.to_string()
         }

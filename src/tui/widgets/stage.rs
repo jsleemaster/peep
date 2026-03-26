@@ -492,14 +492,14 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 if text.is_empty() { continue; }
 
                 let (tree, icon, color) = if is_sub {
-                    ("    ", "\u{1f423} ", theme().sub_agent_text)
+                    (" \u{2502} \u{251c}\u{2500}", "\u{1f423} ", theme().sub_agent_text)
                 } else {
-                    ("  ", "\u{1f414} ", theme().assistant_text)
+                    (" \u{251c}\u{2500}", "\u{1f414} ", theme().assistant_text)
                 };
 
                 lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(dim())),
-                    Span::styled(tree, Style::default()),
+                    Span::styled(format!(" {:>3}", elapsed), Style::default().fg(dim())),
+                    Span::styled(tree, Style::default().fg(border())),
                     Span::styled(icon, Style::default().fg(color)),
                     Span::styled(text.to_string(), Style::default().fg(color)),
                 ]));
@@ -510,9 +510,9 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 if event.tool_name.is_none() { continue; }
                 let tool_text = format_tool(event);
                 let tree = if is_sub {
-                    "      "
+                    " \u{2502} \u{2502} \u{251c}\u{2500}"
                 } else {
-                    "    "
+                    " \u{2502} \u{251c}\u{2500}"
                 };
 
                 let tool_color = match event.tool_name.as_deref().unwrap_or("") {
@@ -524,8 +524,8 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 };
 
                 lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(dim())),
-                    Span::styled(tree, Style::default()),
+                    Span::styled(format!(" {:>3}", elapsed), Style::default().fg(dim())),
+                    Span::styled(tree, Style::default().fg(border())),
                     Span::styled("\u{2699} ", Style::default().fg(tool_color)),
                     Span::styled(tool_text, Style::default().fg(tool_color)),
                 ]));
@@ -534,10 +534,14 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
             // ToolDone with tool_name
             RuntimeEventType::ToolDone if event.tool_name.is_some() => {
                 let tool_text = format_tool(event);
-                let tree = if is_sub { "      " } else { "    " };
+                let tree = if is_sub {
+                    " \u{2502} \u{2502} \u{2514}\u{2500}"
+                } else {
+                    " \u{2502} \u{2514}\u{2500}"
+                };
                 lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(dim())),
-                    Span::styled(tree, Style::default()),
+                    Span::styled(format!(" {:>3}", elapsed), Style::default().fg(dim())),
+                    Span::styled(tree, Style::default().fg(border())),
                     Span::styled("\u{2713} ", Style::default().fg(theme().tool_done)),
                     Span::styled(tool_text, Style::default().fg(dim())),
                 ]));
@@ -588,36 +592,6 @@ fn format_elapsed(ts: i64, _snap: &StoreSnapshot) -> String {
         format!("{}m", diff / 60)
     } else {
         format!("{}h", diff / 3600)
-    }
-}
-
-fn format_who(e: &FeedEvent, snap: &StoreSnapshot) -> String {
-    // Check if this is the leader (Main role)
-    let is_leader = snap
-        .agents
-        .iter()
-        .find(|a| a.agent_id == e.agent_id)
-        .map(|a| a.role == AgentRole::Main)
-        .unwrap_or(false);
-
-    if is_leader {
-        "lead".to_string()
-    } else {
-        format!("\u{2514}{}", &e.short_id)
-    }
-}
-
-fn who_color(e: &FeedEvent, snap: &StoreSnapshot) -> Color {
-    let role = snap
-        .agents
-        .iter()
-        .find(|a| a.agent_id == e.agent_id)
-        .map(|a| a.role);
-
-    match role {
-        Some(AgentRole::Main) => Color::Rgb(255, 200, 80),
-        Some(AgentRole::Team) => Color::Rgb(80, 200, 200),
-        _ => Color::Rgb(255, 220, 80),
     }
 }
 
