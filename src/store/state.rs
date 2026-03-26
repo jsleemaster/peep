@@ -228,7 +228,7 @@ impl AppStore {
         let agents_raw: &[(&str, &str, AgentState, AgentRole, Option<f64>, &str)] = &[
             ("main-worker-0001abcd", "main-worker",  AgentState::Active,    AgentRole::Main,     Some(67.0), "/Users/leeo/evar/platform"),
             ("team-review-0002efgh", "team-review",  AgentState::Waiting,   AgentRole::Team,     Some(22.0), "/Users/leeo/evar/platform"),
-            ("sub-scout-0003ijkl",   "sub-scout",    AgentState::Completed, AgentRole::Subagent, None,       "/Users/leeo/packmen-tui"),
+            ("sub-scout-0003ijkl",   "sub-scout",    AgentState::Completed, AgentRole::Subagent, None,       "/Users/leeo/peep"),
             ("team-builder-0004mnop","team-builder", AgentState::Active,    AgentRole::Team,     Some(45.0), "/Users/leeo/bill-pr"),
         ];
 

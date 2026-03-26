@@ -18,7 +18,7 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, _app: &App, snap: &StoreSnapsho
     let t = theme();
 
     let title_line = Line::from(vec![
-        Span::styled(" packmen", Style::default().fg(t.brand).add_modifier(Modifier::BOLD)),
+        Span::styled(" peep", Style::default().fg(t.brand).add_modifier(Modifier::BOLD)),
     ]);
 
     let active_count = snap.agents.iter().filter(|a| a.state == AgentState::Active).count();

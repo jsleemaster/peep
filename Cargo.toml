@@ -1,11 +1,11 @@
 [package]
-name = "packmen-tui"
+name = "peep"
 version = "0.1.0"
 edition = "2021"
-description = "Terminal dashboard for monitoring Claude Code agent sessions"
+description = "Peep into your AI coding agents — terminal dashboard with pixel art"
 license = "MIT"
-repository = "https://github.com/jsleemaster/packmen-tui"
-keywords = ["tui", "claude", "agent", "monitoring", "terminal"]
+repository = "https://github.com/jsleemaster/peep"
+keywords = ["tui", "ai", "agent", "monitoring", "terminal", "claude", "codex", "gemini"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]

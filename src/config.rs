@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use serde::Deserialize;
 
-/// Top-level configuration loaded from `~/.config/packmen-tui/config.toml`.
+/// Top-level configuration loaded from `~/.config/peep/config.toml`.
 /// All fields are optional — missing values fall back to the defaults below.
 #[derive(Debug, Deserialize, Default)]
 pub struct Config {
@@ -69,7 +69,7 @@ impl Default for TuiConfig {
 pub struct ThemeConfig {}
 
 impl Config {
-    /// Load config from `~/.config/packmen-tui/config.toml`.
+    /// Load config from `~/.config/peep/config.toml`.
     /// Returns `Ok(Config::default())` if the file does not exist.
     pub fn load() -> Result<Self> {
         let path = config_path();
@@ -92,6 +92,6 @@ impl Config {
 fn config_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("packmen-tui")
+        .join("peep")
         .join("config.toml")
 }

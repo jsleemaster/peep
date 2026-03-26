@@ -507,7 +507,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 let mut spans = vec![
                     Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
                     Span::styled(tree, Style::default().fg(border())),
-                    Span::styled("\u{2699} ", Style::default().fg(tool_color)),
+                    Span::styled("\u{2b24} ", Style::default().fg(theme().accent_yellow)), // orange dot = in progress
                     Span::styled(tool_text, Style::default().fg(tool_color)),
                 ];
                 if let Some(ai) = event.ai_tool.as_deref() {
@@ -527,10 +527,15 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 } else {
                     " \u{2502} \u{2514}\u{2500}"
                 };
+                let (dot, dot_color) = if event.is_error {
+                    ("\u{2b24} ", theme().accent_red) // red dot = error
+                } else {
+                    ("\u{2b24} ", theme().accent_green) // green dot = success
+                };
                 lines.push(Line::from(vec![
                     Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
                     Span::styled(tree, Style::default().fg(border())),
-                    Span::styled("\u{2713} ", Style::default().fg(theme().tool_done)),
+                    Span::styled(dot, Style::default().fg(dot_color)),
                     Span::styled(tool_text, Style::default().fg(dim())),
                 ]));
             }

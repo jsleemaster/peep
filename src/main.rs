@@ -28,8 +28,8 @@ use crate::tui::render::{self, StoreSnapshot};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "packmen",
-    about = "Terminal dashboard for monitoring Claude Code agent sessions",
+    name = "peep",
+    about = "Peep into your AI coding agents",
     long_about = None
 )]
 struct Cli {
