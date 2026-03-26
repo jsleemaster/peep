@@ -56,6 +56,12 @@ pub struct Theme {
     pub lead_badge_fg: Color,
     pub lead_badge_bg: Color,
     pub lead_name: Color,
+
+    // AI tool brand colors
+    pub ai_claude: Color,
+    pub ai_codex: Color,
+    pub ai_gemini: Color,
+    pub ai_opencode: Color,
 }
 
 impl Theme {
@@ -94,6 +100,10 @@ impl Theme {
             lead_badge_fg: Color::Rgb(255, 220, 80),
             lead_badge_bg: Color::Rgb(80, 60, 20),
             lead_name: Color::Rgb(255, 200, 80),
+            ai_claude: Color::Rgb(255, 160, 50),
+            ai_codex: Color::Rgb(120, 200, 255),
+            ai_gemini: Color::Rgb(60, 120, 255),
+            ai_opencode: Color::Rgb(180, 100, 255),
         }
     }
 
@@ -132,6 +142,10 @@ impl Theme {
             lead_badge_fg: Color::Rgb(120, 90, 0),
             lead_badge_bg: Color::Rgb(255, 240, 180),
             lead_name: Color::Rgb(150, 110, 0),
+            ai_claude: Color::Rgb(200, 110, 20),
+            ai_codex: Color::Rgb(40, 120, 200),
+            ai_gemini: Color::Rgb(30, 80, 210),
+            ai_opencode: Color::Rgb(120, 50, 200),
         }
     }
 
@@ -148,6 +162,30 @@ impl Theme {
             }
         }
         Self::dark()
+    }
+}
+
+impl Theme {
+    /// Return the brand color for a given AI tool identifier string.
+    pub fn ai_tool_color(&self, tool: &str) -> Color {
+        match tool {
+            "claude" => self.ai_claude,
+            "codex" => self.ai_codex,
+            "gemini" => self.ai_gemini,
+            "opencode" => self.ai_opencode,
+            _ => self.text_dim,
+        }
+    }
+
+    /// Short badge label for an AI tool (e.g. "[C]").
+    pub fn ai_tool_badge(tool: &str) -> &'static str {
+        match tool {
+            "claude" => "[C]",
+            "codex" => "[X]",
+            "gemini" => "[G]",
+            "opencode" => "[O]",
+            _ => "[?]",
+        }
     }
 }
 

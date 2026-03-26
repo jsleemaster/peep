@@ -110,6 +110,7 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                             branch_name,
                             slug: slug.clone(),
                             cwd: cwd.clone(),
+                            ai_tool: None,
                         });
                     }
                 }
@@ -138,6 +139,7 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                             branch_name,
                             slug: slug.clone(),
                             cwd: cwd.clone(),
+                            ai_tool: None,
                         });
                     }
                 }
@@ -184,6 +186,7 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                             branch_name,
                             slug: slug.clone(),
                             cwd: cwd.clone(),
+                            ai_tool: None,
                         });
                     }
                 }
@@ -210,6 +213,7 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                     branch_name,
                     slug: slug.clone(),
                     cwd: cwd.clone(),
+                    ai_tool: None,
                 })
             } else {
                 None
@@ -241,6 +245,7 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
             branch_name,
             slug: slug.clone(),
             cwd: cwd.clone(),
+            ai_tool: None,
         }),
 
         // Legacy format: tool_result at top level
@@ -270,6 +275,7 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                 branch_name,
                 slug: slug.clone(),
                 cwd: cwd.clone(),
+                ai_tool: None,
             })
         }
 

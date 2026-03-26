@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -8,6 +8,43 @@ use tokio::sync::mpsc;
 
 use crate::protocol::jsonl_payload::parse_jsonl_line;
 use crate::protocol::types::RawIngestEvent;
+
+/// Detect which AI tool produced a JSONL file based on its path.
+fn detect_ai_tool(path: &Path) -> Option<String> {
+    let path_str = path.to_string_lossy();
+    if path_str.contains("/.claude/") {
+        Some("claude".to_string())
+    } else if path_str.contains("/.codex/") {
+        Some("codex".to_string())
+    } else if path_str.contains("/.gemini/") {
+        Some("gemini".to_string())
+    } else if path_str.contains(".opencode/") {
+        Some("opencode".to_string())
+    } else {
+        None
+    }
+}
+
+/// Build the list of directories to watch. Starts with the provided `watch_dir`
+/// (defaults to `~/.claude/projects/`), then appends known additional tool dirs
+/// that exist on disk.
+pub fn candidate_watch_dirs(base: PathBuf) -> Vec<PathBuf> {
+    let mut dirs = vec![base];
+
+    if let Some(home) = dirs::home_dir() {
+        let extras = [
+            home.join(".codex").join("sessions"),
+            home.join(".gemini").join("logs").join("sessions"),
+        ];
+        for extra in extras {
+            if extra.exists() {
+                dirs.push(extra);
+            }
+        }
+    }
+
+    dirs
+}
 
 /// Watch `watch_dir` for `.jsonl` files and send new lines as `RawIngestEvent`s.
 ///
@@ -23,9 +60,13 @@ pub async fn run_jsonl_watcher(
     // Track byte offsets per file so we only read new content.
     let mut offsets: HashMap<PathBuf, u64> = HashMap::new();
 
-    // Discover existing .jsonl files and record their current EOF positions.
-    if watch_dir.exists() {
-        discover_jsonl_files(&watch_dir, &mut offsets);
+    // Resolve all directories to watch (base dir + known tool dirs that exist).
+    let watch_dirs = candidate_watch_dirs(watch_dir);
+
+    for dir in &watch_dirs {
+        if dir.exists() {
+            discover_jsonl_files(dir, &mut offsets);
+        }
     }
 
     // Build the notify watcher.  The callback runs on a thread pool, so it
@@ -51,8 +92,10 @@ pub async fn run_jsonl_watcher(
         notify::Config::default().with_poll_interval(Duration::from_millis(500)),
     )?;
 
-    if watch_dir.exists() {
-        watcher.watch(&watch_dir, RecursiveMode::Recursive)?;
+    for dir in &watch_dirs {
+        if dir.exists() {
+            watcher.watch(dir, RecursiveMode::Recursive)?;
+        }
     }
 
     // Main async loop — drains the notify channel and processes modified files.
@@ -150,7 +193,9 @@ async fn drain_file(
             Ok(_) => {
                 // Only process complete lines (terminated by '\n').
                 if line.ends_with('\n') {
-                    if let Some(event) = parse_jsonl_line(&line) {
+                    if let Some(mut event) = parse_jsonl_line(&line) {
+                        // Detect AI tool from file path and tag the event.
+                        event.ai_tool = detect_ai_tool(path);
                         // Non-blocking send; drop event if channel is full.
                         let _ = tx.try_send(event);
                     }

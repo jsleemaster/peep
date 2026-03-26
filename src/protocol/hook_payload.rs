@@ -162,5 +162,6 @@ pub fn parse_hook_payload(body: &Value) -> Option<RawIngestEvent> {
         branch_name,
         slug: None,
         cwd: None,
+        ai_tool: Some("claude".to_string()),
     })
 }

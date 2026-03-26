@@ -184,25 +184,32 @@ async fn main() -> Result<()> {
     // Spawn JSONL watcher
     // ----------------------------------------------------------------
     if watcher_enabled {
-        let dir = watch_dir.unwrap_or_else(|| {
+        let base_dir = watch_dir.unwrap_or_else(|| {
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("/tmp"))
                 .join(".claude")
                 .join("projects")
         });
 
-        if !dir.exists() {
+        // Build candidate list (base + any known extra tool dirs that exist).
+        let watch_dirs =
+            collector::jsonl_watcher::candidate_watch_dirs(base_dir.clone());
+
+        let any_exists = watch_dirs.iter().any(|d| d.exists());
+        if !any_exists {
             eprintln!(
                 "Warning: JSONL watch directory does not exist: {}",
-                dir.display()
+                base_dir.display()
             );
             eprintln!("  -> Continuing without JSONL watcher.");
         } else {
+            // run_jsonl_watcher accepts a single base dir but internally also
+            // expands candidate dirs, so pass base_dir — extras are detected inside.
             let tx_jsonl = tx.clone();
             let sd = shutdown.clone();
             tokio::spawn(async move {
                 tokio::select! {
-                    result = collector::jsonl_watcher::run_jsonl_watcher(dir, tx_jsonl) => {
+                    result = collector::jsonl_watcher::run_jsonl_watcher(base_dir, tx_jsonl) => {
                         if let Err(e) = result {
                             tracing::warn!("JSONL watcher error: {e}");
                             eprintln!("JSONL watcher error: {e}");

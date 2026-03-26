@@ -454,7 +454,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 let prompt_text = event.detail.as_deref().unwrap_or("user prompt");
                 lines.push(Line::raw(""));
                 lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3}", elapsed), Style::default().fg(dim())),
+                    Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
                     Span::styled(" \u{25b6} ", Style::default().fg(theme().user_prompt)),
                     Span::styled(prompt_text.to_string(), Style::default().fg(theme().user_prompt).add_modifier(Modifier::BOLD)),
                 ]));
@@ -471,12 +471,18 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                     (" \u{251c}\u{2500}", "\u{1f414} ", theme().assistant_text)
                 };
 
-                lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3}", elapsed), Style::default().fg(dim())),
+                let mut spans = vec![
+                    Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
                     Span::styled(tree, Style::default().fg(border())),
                     Span::styled(icon, Style::default().fg(color)),
-                    Span::styled(text.to_string(), Style::default().fg(color)),
-                ]));
+                ];
+                if let Some(ai) = event.ai_tool.as_deref() {
+                    let badge = crate::tui::theme::Theme::ai_tool_badge(ai);
+                    let badge_color = theme().ai_tool_color(ai);
+                    spans.push(Span::styled(format!("{} ", badge), Style::default().fg(badge_color)));
+                }
+                spans.push(Span::styled(text.to_string(), Style::default().fg(color)));
+                lines.push(Line::from(spans));
             }
 
             // Tool use = indented action with tree line
@@ -498,12 +504,19 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                     _ => t.text,
                 };
 
-                lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3}", elapsed), Style::default().fg(dim())),
+                let mut spans = vec![
+                    Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
                     Span::styled(tree, Style::default().fg(border())),
                     Span::styled("\u{2699} ", Style::default().fg(tool_color)),
                     Span::styled(tool_text, Style::default().fg(tool_color)),
-                ]));
+                ];
+                if let Some(ai) = event.ai_tool.as_deref() {
+                    let badge = crate::tui::theme::Theme::ai_tool_badge(ai);
+                    let color = t.ai_tool_color(ai);
+                    spans.push(Span::styled(format!(" {}", badge), Style::default().fg(color)));
+                }
+
+                lines.push(Line::from(spans));
             }
 
             // ToolDone with tool_name
@@ -515,7 +528,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                     " \u{2502} \u{2514}\u{2500}"
                 };
                 lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3}", elapsed), Style::default().fg(dim())),
+                    Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
                     Span::styled(tree, Style::default().fg(border())),
                     Span::styled("\u{2713} ", Style::default().fg(theme().tool_done)),
                     Span::styled(tool_text, Style::default().fg(dim())),
@@ -525,7 +538,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
             // Waiting/permission
             RuntimeEventType::PermissionWait => {
                 lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(dim())),
+                    Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
                     Span::styled(" \u{23f3} ", Style::default().fg(theme().lead_name)),
                     Span::styled("waiting for permission...", Style::default().fg(theme().lead_name)),
                 ]));
@@ -561,8 +574,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
 fn format_elapsed(ts: i64, _snap: &StoreSnapshot, is_latest: bool) -> String {
     let now = chrono::Utc::now().timestamp();
     let diff = (now - ts).max(0);
-    if is_latest && diff < 120 {
-        // Active/latest event: show live elapsed
+    let text = if is_latest && diff < 120 {
         if diff < 60 {
             format!("{}초째", diff)
         } else {
@@ -574,7 +586,8 @@ fn format_elapsed(ts: i64, _snap: &StoreSnapshot, is_latest: bool) -> String {
         format!("{}분 전", diff / 60)
     } else {
         format!("{}시간 전", diff / 3600)
-    }
+    };
+    format!("{:>7}", text)
 }
 
 fn is_sub_agent(e: &FeedEvent, snap: &StoreSnapshot) -> bool {

@@ -78,6 +78,7 @@ impl AppStore {
                 cost_usd: None,
                 model_name: None,
                 cwd: raw.cwd.clone(),
+                ai_tool: raw.ai_tool.clone(),
             }
         });
 
@@ -120,6 +121,7 @@ impl AppStore {
             total_tokens: raw.total_tokens,
             is_error: raw.is_error,
             ingest_source: raw.source,
+            ai_tool: raw.ai_tool,
         };
 
         self.feed.push_back(feed_event);
@@ -256,6 +258,7 @@ impl AppStore {
                     cost_usd:      Some(0.12),
                     model_name:    Some("claude-sonnet-4-5".to_string()),
                     cwd:           Some(cwd.to_string()),
+                    ai_tool:       Some("claude".to_string()),
                 },
             );
         }
@@ -309,6 +312,7 @@ impl AppStore {
                 total_tokens: Some(42_000),
                 is_error: false,
                 ingest_source: IngestSource::Http,
+                ai_tool: Some("claude".to_string()),
             };
             self.feed.push_back(ev);
         }

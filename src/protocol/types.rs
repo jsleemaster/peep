@@ -127,6 +127,7 @@ pub struct Agent {
     pub cost_usd: Option<f64>,
     pub model_name: Option<String>,
     pub cwd: Option<String>,
+    pub ai_tool: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -145,6 +146,7 @@ pub struct FeedEvent {
     pub total_tokens: Option<u64>,
     pub is_error: bool,
     pub ingest_source: IngestSource,
+    pub ai_tool: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -180,4 +182,5 @@ pub struct RawIngestEvent {
     pub branch_name: Option<String>,
     pub slug: Option<String>,
     pub cwd: Option<String>,
+    pub ai_tool: Option<String>,
 }
