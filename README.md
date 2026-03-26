@@ -42,34 +42,37 @@ peep
 
 ## Installation
 
-### From source (recommended)
+### Download binary (easiest)
+
+Download the latest release for your platform:
+
+```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-macos-arm64.tar.gz | tar xz
+sudo mv peep /usr/local/bin/
+
+# macOS (Intel)
+curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-macos-intel.tar.gz | tar xz
+sudo mv peep /usr/local/bin/
+
+# Linux (x86_64)
+curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-linux-x86_64.tar.gz | tar xz
+sudo mv peep /usr/local/bin/
+```
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap jsleemaster/tap
+brew install peep
+```
+
+### Cargo (from source)
 
 Requires [Rust](https://rustup.rs/) 1.75+:
 
 ```bash
-# Install Rust (if not already installed)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Install peep
 cargo install --git https://github.com/jsleemaster/peep
-```
-
-### From source (local build)
-
-```bash
-git clone https://github.com/jsleemaster/peep.git
-cd peep
-cargo install --path .
-```
-
-### Shell setup
-
-If `peep` command is not found after install, add cargo bin to your PATH:
-
-```bash
-# Add to ~/.zshrc (macOS) or ~/.bashrc (Linux)
-echo 'source "$HOME/.cargo/env"' >> ~/.zshrc
-source ~/.zshrc
 ```
 
 ## Usage
