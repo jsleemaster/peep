@@ -139,7 +139,7 @@ impl Theme {
     pub fn auto_detect() -> Self {
         // Check $COLORFGBG (format: "fg;bg", bg > 8 suggests light)
         if let Ok(val) = std::env::var("COLORFGBG") {
-            if let Some(bg_str) = val.split(';').last() {
+            if let Some(bg_str) = val.split(';').next_back() {
                 if let Ok(bg) = bg_str.trim().parse::<u32>() {
                     if bg > 8 {
                         return Self::light();

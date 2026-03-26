@@ -189,6 +189,12 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                 }
 
                 // Plain user message (no tool_result) = new turn
+                // Extract user's text content
+                let user_text = blocks.iter()
+                    .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                    .and_then(|b| b.get("text").and_then(|t| t.as_str()))
+                    .map(|s| truncate(s, 200));
+
                 Some(RawIngestEvent {
                     source: IngestSource::Jsonl,
                     agent_runtime_id: session_id.clone(),
@@ -198,7 +204,7 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                     hook_event_name: Some("UserPromptSubmit".into()),
                     tool_name: None,
                     file_path: None,
-                    detail: None,
+                    detail: user_text,
                     total_tokens: None,
                     is_error: false,
                     branch_name,

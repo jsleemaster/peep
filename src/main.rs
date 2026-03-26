@@ -268,10 +268,7 @@ async fn main() -> Result<()> {
             AppEvent::Tick => {
                 app.tick += 1;
 
-                if !app.stage.initialized {
-                    app.stage.initialized = true;
-                }
-                app.stage.tick += 1;
+                app.tick += 1;
 
                 // Update project list
                 let projects = crate::tui::widgets::stage::get_projects(&snap);

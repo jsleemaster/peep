@@ -476,13 +476,14 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         let is_sub = is_sub_agent(event, snap);
 
         match event.event_type {
-            // User prompt = top-level comment
+            // User prompt = top-level comment with text
             RuntimeEventType::TurnActive => {
+                let prompt_text = event.detail.as_deref().unwrap_or("user prompt");
                 lines.push(Line::raw(""));
                 lines.push(Line::from(vec![
-                    Span::styled(format!(" {:>3} ", elapsed), Style::default().fg(dim())),
-                    Span::styled("\u{25b6} ", Style::default().fg(theme().user_prompt)),
-                    Span::styled("user prompt", Style::default().fg(theme().user_prompt).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" {:>3}", elapsed), Style::default().fg(dim())),
+                    Span::styled(" \u{25b6} ", Style::default().fg(theme().user_prompt)),
+                    Span::styled(prompt_text.to_string(), Style::default().fg(theme().user_prompt).add_modifier(Modifier::BOLD)),
                 ]));
             }
 

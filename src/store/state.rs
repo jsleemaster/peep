@@ -287,7 +287,7 @@ impl AppStore {
         ];
 
         for (i, (agent_id, event_type, tool_name, file_path)) in feed_entries.iter().enumerate() {
-            let skill = tool_name.map(|t| tool_name_to_skill(t));
+            let skill = tool_name.map(tool_name_to_skill);
             // Compute display_name from agent_id stored in agents map
             let (display_name, short_id) = self
                 .agents

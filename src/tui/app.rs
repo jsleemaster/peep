@@ -1,7 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::tui::sprites::stage_state::StageState;
-
 // Single view — no tabs needed
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,11 +29,7 @@ pub struct App {
 
     pub port: u16,
 
-    // Stage state
-    pub stage: StageState,
     pub tick: usize,
-    #[allow(dead_code)]
-    pub last_feed_count: usize,
 
     // Project selection (cwd-based)
     pub current_project: Option<String>,  // selected cwd, None = all
@@ -57,9 +51,7 @@ impl App {
             feed_count: 0,
             session_count: 0,
             port,
-            stage: StageState::new(),
             tick: 0,
-            last_feed_count: 0,
             current_project: None,
             project_index: 0,
         }
@@ -215,7 +207,7 @@ impl App {
         }
         // Wrap index if out of bounds
         if self.project_index >= projects.len() {
-            self.project_index = self.project_index % projects.len();
+            self.project_index %= projects.len();
         }
         // Resolve project from index
         self.current_project = Some(projects[self.project_index].clone());
