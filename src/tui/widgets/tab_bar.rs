@@ -31,8 +31,12 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, _app: &App, snap: &StoreSnapsho
 
     let sep = Span::styled(" \u{2502} ", Style::default().fg(t.border));
 
-    // Show branch if leader has one
-    let branch = snap.agents.first().and_then(|a| a.branch_name.clone());
+    // Show branch from the most recently active agent
+    let branch = snap.agents.iter()
+        .filter(|a| a.state == AgentState::Active)
+        .max_by_key(|a| a.last_event_ts)
+        .or_else(|| snap.agents.first())
+        .and_then(|a| a.branch_name.clone());
 
     let mut stats = vec![
         Span::styled(" ", Style::default()),
