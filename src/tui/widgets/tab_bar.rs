@@ -13,13 +13,21 @@ use crate::tui::render::StoreSnapshot;
 use crate::tui::theme::theme;
 use crate::tui::widgets::stage;
 
-pub fn render_tab_bar(f: &mut Frame, area: Rect, _app: &App, snap: &StoreSnapshot) {
+pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
     let m = &snap.metrics;
     let t = theme();
 
-    let title_line = Line::from(vec![
+    let mut title_spans = vec![
         Span::styled(" peep", Style::default().fg(t.brand).add_modifier(Modifier::BOLD)),
-    ]);
+        Span::styled(format!(" v{}", crate::update::UpdateStatus::current()), Style::default().fg(t.text_dim)),
+    ];
+    if let Some(ref new_ver) = app.update_available {
+        title_spans.push(Span::styled(
+            format!(" → v{} available! (brew upgrade peep)", new_ver),
+            Style::default().fg(t.accent_green),
+        ));
+    }
+    let title_line = Line::from(title_spans);
 
     let active_count = snap.agents.iter().filter(|a| a.state == AgentState::Active).count();
     let waiting_count = snap.agents.iter().filter(|a| a.state == AgentState::Waiting).count();

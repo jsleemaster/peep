@@ -10,6 +10,7 @@ pub enum FocusPane {
 
 pub struct App {
     pub focus: FocusPane,
+    pub update_available: Option<String>, // Some("0.3.0") if new version
     pub running: bool,
     pub show_detail_overlay: bool,
     pub show_filter: bool,
@@ -40,6 +41,7 @@ impl App {
     pub fn new(port: u16) -> Self {
         App {
             focus: FocusPane::MainPanel,
+            update_available: None,
             running: true,
             show_detail_overlay: false,
             show_filter: false,

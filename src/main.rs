@@ -3,6 +3,7 @@ mod config;
 mod protocol;
 mod store;
 mod tui;
+mod update;
 
 use std::io;
 use std::panic;
@@ -95,6 +96,10 @@ async fn main() -> Result<()> {
         _ => crate::tui::theme::Theme::auto_detect(),
     };
     crate::tui::theme::init_theme(theme);
+
+    // Background update check
+    let update_status = update::UpdateStatus::new();
+    update_status.check_in_background();
 
     // CLI args override config file values
     let port = cli.port.unwrap_or(cfg.server.port);
@@ -274,6 +279,13 @@ async fn main() -> Result<()> {
             AppEvent::Key(key) => app.handle_key(key),
             AppEvent::Tick => {
                 app.tick += 1;
+
+                // Check update status (non-blocking)
+                if app.update_available.is_none() && app.tick % 50 == 0 {
+                    if let Some(v) = update_status.try_get() {
+                        app.update_available = Some(v);
+                    }
+                }
 
                 app.tick += 1;
 
