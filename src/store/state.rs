@@ -55,18 +55,25 @@ impl AppStore {
 
         // Upsert agent
         let agent = self.agents.entry(agent_id.clone()).or_insert_with(|| {
-            // Prefer slug > session_runtime_id > short_id for display name
-            let display_name = raw
-                .slug
-                .clone()
-                .or_else(|| raw.session_runtime_id.clone())
-                .unwrap_or_else(|| short_id.clone());
+            // Sub-agents: use detail (description) as name
+            // Others: slug > session_runtime_id > short_id
+            let display_name = if raw.hook_event_name.as_deref() == Some("AgentSpawn") {
+                raw.detail.clone().unwrap_or_else(|| short_id.clone())
+            } else {
+                raw.slug.clone()
+                    .or_else(|| raw.session_runtime_id.clone())
+                    .unwrap_or_else(|| short_id.clone())
+            };
             Agent {
                 agent_id: agent_id.clone(),
                 display_name,
                 short_id: short_id.clone(),
                 state: new_state,
-                role: AgentRole::Main, // default; could be refined
+                role: if raw.hook_event_name.as_deref() == Some("AgentSpawn") {
+                    AgentRole::Subagent
+                } else {
+                    AgentRole::Main
+                },
                 current_skill: skill,
                 branch_name: raw.branch_name.clone(),
                 skill_usage: HashMap::new(),

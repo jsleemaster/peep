@@ -68,10 +68,41 @@ pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
                 // Look for the first tool_use block
                 for block in blocks {
                     if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
-                        let tool_name = block
-                            .get("name")
-                            .and_then(|n| n.as_str())
-                            .map(str::to_string);
+                        let tool_name_str = block.get("name").and_then(|n| n.as_str()).unwrap_or("");
+
+                        // Agent tool call = sub-agent spawn
+                        if tool_name_str == "Agent" {
+                            let desc = block
+                                .get("input")
+                                .and_then(|i| i.get("description"))
+                                .and_then(|d| d.as_str())
+                                .map(|s| truncate(s, 200));
+                            let sub_id = block
+                                .get("id")
+                                .and_then(|i| i.as_str())
+                                .unwrap_or("sub");
+                            // Create a sub-agent with unique ID
+                            let sub_agent_id = format!("{}-{}", session_id, sub_id);
+                            return Some(RawIngestEvent {
+                                source: IngestSource::Jsonl,
+                                agent_runtime_id: sub_agent_id,
+                                session_runtime_id: Some(session_id),
+                                ts,
+                                event_type: RuntimeEventType::ToolStart,
+                                hook_event_name: Some("AgentSpawn".into()),
+                                tool_name: Some("Agent".into()),
+                                file_path: None,
+                                detail: desc,
+                                total_tokens,
+                                is_error: false,
+                                branch_name,
+                                slug: slug.clone(),
+                                cwd: cwd.clone(),
+                                ai_tool: None,
+                            });
+                        }
+
+                        let tool_name = Some(tool_name_str.to_string());
 
                         let file_path = block
                             .get("input")
