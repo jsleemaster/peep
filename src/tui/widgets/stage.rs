@@ -462,6 +462,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     let f_lower = filter.to_lowercase();
 
     let mut lines: Vec<Line> = Vec::new();
+    let last_ts = proj_feed.last().map(|e| e.ts).unwrap_or(0);
 
     for event in proj_feed.iter() {
         // Apply filter
@@ -473,7 +474,8 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
             if !matches { continue; }
         }
 
-        let elapsed = format_elapsed(event.ts, snap);
+        let is_latest = event.ts == last_ts;
+        let elapsed = format_elapsed(event.ts, snap, is_latest);
         let is_sub = is_sub_agent(event, snap);
 
         match event.event_type {
@@ -586,10 +588,17 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
 
 // --- Helpers ---
 
-fn format_elapsed(ts: i64, _snap: &StoreSnapshot) -> String {
+fn format_elapsed(ts: i64, _snap: &StoreSnapshot, is_latest: bool) -> String {
     let now = chrono::Utc::now().timestamp();
     let diff = (now - ts).max(0);
-    if diff < 60 {
+    if is_latest && diff < 120 {
+        // Active/latest event: show live elapsed
+        if diff < 60 {
+            format!("{}초째", diff)
+        } else {
+            format!("{}분째", diff / 60)
+        }
+    } else if diff < 60 {
         "방금".to_string()
     } else if diff < 3600 {
         format!("{}분 전", diff / 60)
