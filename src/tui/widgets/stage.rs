@@ -90,13 +90,13 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) 
             let name = short_project_name(proj);
             let is_selected = app.current_project.as_deref() == Some(proj);
             let style = if is_selected {
-                Style::default().fg(Color::Rgb(255, 220, 80)).bg(Color::Rgb(50, 45, 30)).add_modifier(Modifier::BOLD)
+                Style::default().fg(theme().lead_badge_fg).bg(theme().lead_badge_bg).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(dim()).bg(bg())
             };
             tab_spans.push(Span::styled(format!(" {} ", name), style));
             if i < projects.len() - 1 {
-                tab_spans.push(Span::styled(" \u{2502} ", Style::default().fg(Color::Rgb(40, 40, 55)).bg(bg())));
+                tab_spans.push(Span::styled(" \u{2502} ", Style::default().fg(theme().hp_empty).bg(bg())));
             }
         }
         f.render_widget(Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(bg())), chunks[0]);
@@ -235,12 +235,13 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         let ctx_pct = (100.0 - used_pct).max(0.0); // HP = remaining
         let filled = ((ctx_pct / 100.0) * 10.0).round() as usize;
         let empty = 10usize.saturating_sub(filled);
+        let t = theme();
         let hp_color = if ctx_pct < 20.0 {
-            Color::Rgb(255, 80, 80)   // low HP = danger red
+            t.hp_danger
         } else if ctx_pct < 50.0 {
-            Color::Rgb(255, 200, 80)  // medium = warning yellow
+            t.hp_warn
         } else {
-            Color::Rgb(100, 220, 140) // healthy = green
+            t.hp_good
         };
 
         let tokens_str = AppStore::format_tokens(leader.total_tokens);
@@ -257,7 +258,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             ),
             Span::styled(
                 "\u{2591}".repeat(empty),
-                Style::default().fg(Color::Rgb(40, 40, 55)),
+                Style::default().fg(theme().hp_empty),
             ),
             Span::styled(
                 format!(" {:.0}%", ctx_pct),
@@ -290,7 +291,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                 party_members.len(),
                 "\u{2500}".repeat(22)
             ),
-            Style::default().fg(Color::Rgb(90, 90, 110)),
+            Style::default().fg(dim()),
         ));
         f.render_widget(
             Paragraph::new(sep).style(Style::default().bg(card_bg())),
@@ -355,7 +356,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                 f.render_widget(
                     Paragraph::new(Line::from(Span::styled(
                         zzz,
-                        Style::default().fg(Color::Rgb(120, 120, 170)),
+                        Style::default().fg(dim()),
                     )))
                     .style(Style::default().bg(card_bg())),
                     Rect::new(spr_x + spr_w, my, 5, 1),
@@ -418,9 +419,9 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             let sc = if is_done {
                 dim()
             } else if is_waiting {
-                Color::Rgb(200, 200, 80)
+                theme().accent_yellow
             } else {
-                Color::Rgb(100, 220, 140)
+                theme().accent_green
             };
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(
@@ -443,7 +444,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         .title(" conversation ")
         .title_style(
             Style::default()
-                .fg(Color::Rgb(180, 180, 220))
+                .fg(theme().text_bright)
                 .add_modifier(Modifier::BOLD),
         )
         .style(Style::default().bg(card_bg()));
@@ -516,12 +517,13 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                     " \u{2502} \u{251c}\u{2500}"
                 };
 
+                let t = theme();
                 let tool_color = match event.tool_name.as_deref().unwrap_or("") {
-                    "Read" | "Grep" | "Glob" => Color::Cyan,
-                    "Edit" | "Write" => Color::Yellow,
-                    "Bash" => Color::Red,
-                    "Task" | "TaskCreate" | "TaskUpdate" => Color::Magenta,
-                    _ => Color::White,
+                    "Read" | "Grep" | "Glob" => t.tool_read,
+                    "Edit" | "Write" => t.tool_edit,
+                    "Bash" => t.tool_bash,
+                    "Task" | "TaskCreate" | "TaskUpdate" => t.tool_task,
+                    _ => t.text,
                 };
 
                 lines.push(Line::from(vec![
@@ -588,11 +590,11 @@ fn format_elapsed(ts: i64, _snap: &StoreSnapshot) -> String {
     let now = chrono::Utc::now().timestamp();
     let diff = (now - ts).max(0);
     if diff < 60 {
-        format!("{}s", diff)
+        "방금".to_string()
     } else if diff < 3600 {
-        format!("{}m", diff / 60)
+        format!("{}분 전", diff / 60)
     } else {
-        format!("{}h", diff / 3600)
+        format!("{}시간 전", diff / 3600)
     }
 }
 
