@@ -641,7 +641,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         }
 
         // Build prefix: elapsed + space + marker + space
-        let prefix = vec![
+        let mut prefix = vec![
             Span::styled(elapsed.clone(), Style::default().fg(dim())),
             Span::styled(" ", Style::default().bg(card_bg())),
             Span::styled(marker, Style::default().fg(marker_fg)),
@@ -697,7 +697,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 lines.extend(wrapped);
             }
 
-            // Tool start
+            // Tool start — badge dot as separate colored span in prefix
             RuntimeEventType::ToolStart => {
                 if event.tool_name.is_none() { continue; }
                 let t = theme();
@@ -709,13 +709,13 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                     _ => t.text,
                 };
                 let tool_text = format_tool(event);
+                // Add badge dot to prefix with its own color
+                if let Some((dot, dot_color)) = tool_badge {
+                    prefix.push(Span::styled(format!("{} ", dot), Style::default().fg(dot_color)));
+                }
                 let mut content = String::new();
                 if let Some(ref tag) = sub_tag_str {
                     content.push_str(tag);
-                }
-                if let Some((dot, _)) = tool_badge {
-                    content.push_str(dot);
-                    content.push(' ');
                 }
                 content.push_str(&tool_text);
                 if let Some(ai) = event.ai_tool.as_deref() {
@@ -725,16 +725,15 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 lines.extend(wrapped);
             }
 
-            // Tool done
+            // Tool done — badge dot as separate colored span in prefix
             RuntimeEventType::ToolDone if event.tool_name.is_some() => {
                 let tool_text = format_tool(event);
+                if let Some((dot, dot_color)) = tool_badge {
+                    prefix.push(Span::styled(format!("{} ", dot), Style::default().fg(dot_color)));
+                }
                 let mut content = String::new();
                 if let Some(ref tag) = sub_tag_str {
                     content.push_str(tag);
-                }
-                if let Some((dot, _)) = tool_badge {
-                    content.push_str(dot);
-                    content.push(' ');
                 }
                 content.push_str(&tool_text);
                 let wrapped = wrap_with_tree(prefix, &content, Style::default().fg(dim()), &cont_prefix, max_w);
