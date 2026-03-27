@@ -996,16 +996,15 @@ fn sub_agent_stage_icon(e: &FeedEvent, snap: &StoreSnapshot) -> &'static str {
 
 fn format_tool(e: &FeedEvent) -> String {
     let tool = e.tool_name.as_deref().unwrap_or("?");
-    let padded = format!("{:<8}", tool); // fixed 8-char tool name column
     let path = e.file_path.as_deref().unwrap_or("");
     if !path.is_empty() {
         let parts: Vec<&str> = path.rsplit('/').take(3).collect();
         let short_path: String = parts.into_iter().rev().collect::<Vec<_>>().join("/");
-        format!("{} {}", padded, short_path)
+        format!("{} {}", tool, short_path)
     } else if let Some(ref detail) = e.detail {
-        format!("{} {}", padded, detail)
+        format!("{} {}", tool, detail)
     } else {
-        padded.trim_end().to_string()
+        tool.to_string()
     }
 }
 
