@@ -690,7 +690,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 if let Some(ref tag) = sub_tag_str {
                     content.push_str(tag);
                 }
-                content.push_str(&format!("\u{2b24} {}", tool_text));
+                content.push_str(&format!("\u{25cf}  {}", tool_text)); // ● + 2 spaces
                 if let Some(ai) = event.ai_tool.as_deref() {
                     content.push_str(&format!(" {}", crate::tui::theme::Theme::ai_tool_badge(ai)));
                 }
@@ -702,15 +702,15 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
             RuntimeEventType::ToolDone if event.tool_name.is_some() => {
                 let tool_text = format_tool(event);
                 let (done_marker, done_color) = if event.is_error {
-                    ("\u{2717}", theme().accent_red)
+                    ("\u{25cf}", theme().accent_red)   // red ●
                 } else {
-                    ("\u{2713}", theme().accent_green)
+                    ("\u{25cf}", theme().accent_green)  // green ●
                 };
                 let mut content = String::new();
                 if let Some(ref tag) = sub_tag_str {
                     content.push_str(tag);
                 }
-                content.push_str(&format!("{} {}", done_marker, tool_text));
+                content.push_str(&format!("{}  {}", done_marker, tool_text)); // ● + 2 spaces
                 let wrapped = wrap_with_tree(prefix, &content, Style::default().fg(done_color), &cont_prefix, max_w);
                 lines.extend(wrapped);
             }
