@@ -13,7 +13,7 @@ use anyhow::Result;
 use chrono::Utc;
 use clap::Parser;
 use crossterm::{
-    event::DisableMouseCapture,
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -267,7 +267,7 @@ async fn main() -> Result<()> {
     // ----------------------------------------------------------------
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -287,6 +287,7 @@ async fn main() -> Result<()> {
 
         match event_handler.next()? {
             AppEvent::Key(key) => app.handle_key(key),
+            AppEvent::Mouse(mouse) => app.handle_mouse(mouse),
             AppEvent::Tick => {
                 app.tick += 1;
 

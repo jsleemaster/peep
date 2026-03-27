@@ -1,11 +1,12 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyEvent, KeyEventKind, MouseEvent, MouseEventKind};
 
 #[allow(dead_code)]
 pub enum AppEvent {
     Key(KeyEvent),
+    Mouse(MouseEvent),
     Tick,
     Resize(u16, u16),
 }
@@ -25,7 +26,11 @@ impl EventHandler {
         if event::poll(self.tick_rate)? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => Ok(AppEvent::Key(key)),
-                Event::Key(_) => Ok(AppEvent::Tick), // ignore Release/Repeat
+                Event::Key(_) => Ok(AppEvent::Tick),
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => Ok(AppEvent::Mouse(mouse)),
+                    _ => Ok(AppEvent::Tick),
+                },
                 Event::Resize(w, h) => Ok(AppEvent::Resize(w, h)),
                 _ => Ok(AppEvent::Tick),
             }

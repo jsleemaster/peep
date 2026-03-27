@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
 // Single view — no tabs needed
 
@@ -170,6 +170,16 @@ impl App {
                 self.focused_agent = None;
             }
 
+            _ => {}
+        }
+    }
+
+    /// Handle mouse scroll — macOS natural scrolling: ScrollDown = content up
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) {
+        match mouse.kind {
+            // macOS natural scrolling: ScrollDown moves content up (= scroll_down)
+            MouseEventKind::ScrollDown => self.scroll_down(),
+            MouseEventKind::ScrollUp => self.scroll_up(),
             _ => {}
         }
     }
