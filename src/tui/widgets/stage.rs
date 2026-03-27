@@ -571,15 +571,16 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     }
 
     // ── Vertical timeline layout ──
-    // All spine markers are 1 cell: ● ◆ ◇ │ → guaranteed alignment
-    // Layout: [elapsed 7dw] [space] [marker 1] [space] [content...]
-    //          0─────────6   7       8          9        10+
+    // Spine: emoji icons (🐔🐣◇) on event lines, │ between events
+    // Layout: [elapsed 7dw] [space] [emoji 2dw] [space] [content...]
+    //          0─────────6   7       8─────9     10       11+
+    // │ at position 8, content at position 11
     let filter = &app.filter_text;
     let f_lower = filter.to_lowercase();
 
     let max_w = inner.width as usize;
     let spine_pos = 8usize;
-    let content_start = 10usize;
+    let content_start = 11usize;
     let spine_sep = format!("{}│", " ".repeat(spine_pos));
     let cont_prefix = format!("{}│{}", " ".repeat(spine_pos), " ".repeat(content_start - spine_pos - 1));
 
@@ -600,35 +601,38 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         let elapsed = format_elapsed(event.ts, snap, is_latest);
         let is_sub = is_sub_agent(event, snap);
 
-        // Determine 1-cell marker and color
-        // ToolDone: green/red dot, ToolStart: tool color, others: agent-based
+        // Determine spine emoji icon (2 cells each)
         let (marker, marker_fg) = if event.event_type == RuntimeEventType::TurnActive {
-            ("\u{25c7}", theme().user_prompt) // ◇ user prompt
+            ("\u{25c7} ", theme().user_prompt) // ◇ + space = 2 cells for user prompt
         } else if event.event_type == RuntimeEventType::PermissionWait {
-            ("\u{25cb}", theme().lead_name) // ○ waiting
-        } else if event.event_type == RuntimeEventType::ToolDone {
-            if event.is_error {
-                ("\u{25cf}", theme().accent_red) // ● red
-            } else {
-                ("\u{25cf}", theme().accent_green) // ● green
-            }
-        } else if event.event_type == RuntimeEventType::ToolStart {
-            let t = theme();
-            let tc = match event.tool_name.as_deref().unwrap_or("") {
-                "Read" | "Grep" | "Glob" => t.tool_read,
-                "Edit" | "Write" => t.tool_edit,
-                "Bash" => t.tool_bash,
-                "Task" | "TaskCreate" | "TaskUpdate" => t.tool_task,
-                _ => t.accent_yellow,
-            };
-            ("\u{25cf}", tc) // ● tool color
+            ("\u{23f3}", theme().lead_name) // ⏳ waiting
         } else if is_sub && !is_focused {
-            let color = sub_agent_map.get(event.agent_id.as_str())
-                .map(|(_, c)| *c)
-                .unwrap_or(theme().sub_agent_text);
-            ("\u{25c6}", color) // ◆ sub-agent (colored)
+            ("\u{1f423}", theme().sub_agent_text) // 🐣 sub-agent
         } else {
-            ("\u{25cf}", theme().assistant_text) // ● main agent
+            ("\u{1f414}", theme().assistant_text) // 🐔 main agent
+        };
+
+        // Status badge dot for tool events (placed in content)
+        let tool_badge: Option<(&str, Color)> = match event.event_type {
+            RuntimeEventType::ToolStart => {
+                let t = theme();
+                let tc = match event.tool_name.as_deref().unwrap_or("") {
+                    "Read" | "Grep" | "Glob" => t.tool_read,
+                    "Edit" | "Write" => t.tool_edit,
+                    "Bash" => t.tool_bash,
+                    "Task" | "TaskCreate" | "TaskUpdate" => t.tool_task,
+                    _ => t.accent_yellow,
+                };
+                Some(("\u{25cf}", tc)) // ● colored
+            }
+            RuntimeEventType::ToolDone => {
+                if event.is_error {
+                    Some(("\u{25cf}", theme().accent_red)) // ● red
+                } else {
+                    Some(("\u{25cf}", theme().accent_green)) // ● green
+                }
+            }
+            _ => None,
         };
 
         // Spine separator line (skip before first event)
@@ -709,6 +713,10 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 if let Some(ref tag) = sub_tag_str {
                     content.push_str(tag);
                 }
+                if let Some((dot, _)) = tool_badge {
+                    content.push_str(dot);
+                    content.push(' ');
+                }
                 content.push_str(&tool_text);
                 if let Some(ai) = event.ai_tool.as_deref() {
                     content.push_str(&format!(" {}", crate::tui::theme::Theme::ai_tool_badge(ai)));
@@ -717,12 +725,16 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 lines.extend(wrapped);
             }
 
-            // Tool done — marker color already set above (green/red)
+            // Tool done
             RuntimeEventType::ToolDone if event.tool_name.is_some() => {
                 let tool_text = format_tool(event);
                 let mut content = String::new();
                 if let Some(ref tag) = sub_tag_str {
                     content.push_str(tag);
+                }
+                if let Some((dot, _)) = tool_badge {
+                    content.push_str(dot);
+                    content.push(' ');
                 }
                 content.push_str(&tool_text);
                 let wrapped = wrap_with_tree(prefix, &content, Style::default().fg(dim()), &cont_prefix, max_w);
