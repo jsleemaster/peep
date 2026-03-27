@@ -455,9 +455,12 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             };
             let sub_color = theme().sub_agent_color(sub_index);
             let is_focused = app.focused_agent.as_deref() == Some(&member.agent_id);
+            // sidebar_selected: 0 = leader, 1+ = party members (1-indexed)
+            let is_selected = app.focus == crate::tui::app::FocusPane::Sidebar
+                && app.sidebar_selected == i + 1; // +1 because 0 is leader
             let tag = format!("[{}]", stage_icon);
             let label = format!("{} {}", tag, member.display_name);
-            let color = if is_focused {
+            let color = if is_focused || is_selected {
                 sub_color
             } else {
                 match stage {
@@ -467,8 +470,8 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                     _ => dim(),
                 }
             };
-            let style = if is_focused {
-                Style::default().fg(color).add_modifier(Modifier::BOLD)
+            let style = if is_focused || is_selected {
+                Style::default().fg(color).bg(Color::Rgb(40, 40, 60)).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(color)
             };

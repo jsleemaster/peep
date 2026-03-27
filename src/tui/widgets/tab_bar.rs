@@ -1,6 +1,6 @@
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
@@ -66,7 +66,7 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     stats.push(sep.clone());
     stats.push(Span::styled(
         format!("tokens:{}", AppStore::format_tokens(m.total_tokens)),
-        Style::default().fg(t.text_muted),
+        Style::default().fg(Color::Rgb(220, 100, 100)), // soft red for token usage
     ));
 
     stats.push(sep.clone());
@@ -75,7 +75,7 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         Style::default().fg(t.accent_green),
     ));
 
-    let hint = "q:quit j/k:scroll [,]:project";
+    let hint = "q:quit j/k:scroll h/l:focus Enter:agent Esc:back [,]:project";
     let left_len: usize = stats.iter().map(|s| s.content.chars().count()).sum();
     let padding = (area.width as usize).saturating_sub(left_len + hint.chars().count() + 2);
     stats.push(Span::raw(" ".repeat(padding)));
