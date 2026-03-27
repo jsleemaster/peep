@@ -102,7 +102,12 @@ impl AppStore {
         }
 
         if let Some(tokens) = raw.total_tokens {
-            agent.total_tokens = agent.total_tokens.max(tokens); // keep highest seen
+            // Detect session rollover: token count drops >50% → context was reset
+            if tokens > 0 && agent.total_tokens > 0 && tokens < agent.total_tokens / 2 {
+                agent.total_tokens = tokens; // reset HP to new session baseline
+            } else {
+                agent.total_tokens = agent.total_tokens.max(tokens);
+            }
         }
 
         if let Some(s) = skill {

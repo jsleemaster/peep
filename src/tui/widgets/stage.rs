@@ -614,8 +614,10 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
             ("\u{25cf}", theme().assistant_text) // ● main agent
         };
 
-        // Spine separator line
-        lines.push(Line::from(Span::styled(spine_sep.clone(), Style::default().fg(border()))));
+        // Spine separator line (skip before first event)
+        if !lines.is_empty() {
+            lines.push(Line::from(Span::styled(spine_sep.clone(), Style::default().fg(border()))));
+        }
 
         // Build prefix: elapsed + space + marker + space
         let prefix = vec![

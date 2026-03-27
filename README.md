@@ -9,27 +9,46 @@ peep
  ●1 ◐0 │ 🐔1 🐣1 │ tokens:168.8k │ $0.00         q:quit j/k:scroll [,]:project
 ┌──────────────────────┬─────────────────────────────────────────────────────────┐
 │ refactored-badger LEAD│ conversation                                           │
-│                      │  방금 ▶ auth module 리팩토링 해줘                       │
-│     🐔               │  방금 ├─🐔 네, auth module을 확인하겠습니다.            │
-│                      │  방금 │ ├─⬤ Read src/auth.ts                           │
-│ HP ████████░░ 83%    │  방금 │ └─⬤ Read src/config.ts                         │
-│                      │  방금 ├─🐔 리팩토링을 시작합니다.                       │
-│ ── party (1) ──────  │  방금 │ ├─⬤ Edit src/auth.ts                           │
-│  🥚 sub-worker      │  방금 │ └─⬤ Bash npm test                              │
-│     hatching...      │                                                         │
+│                      │        │                                                │
+│     🐔               │  방금  ◇ auth module 리팩토링 해줘                      │
+│                      │        │                                                │
+│ HP ████████░░ 83%    │  방금  ● [C] 네, auth module을 확인하겠습니다.          │
+│                      │        │                                                │
+│ ── party (1) ──────  │  방금  ● ●  Read     src/auth.ts                       │
+│  🥚 sub-worker      │        │                                                │
+│     hatching...      │  방금  ● ●  Read     src/config.ts                     │
+│                      │        │                                                │
 └──────────────────────┴─────────────────────────────────────────────────────────┘
 ```
 
 ## Features
 
+- **Vertical timeline** — Centered spine layout with `│` `●` `◆` `◇` markers
 - **Pixel art characters** — Leader agent is a mother hen, sub-agents start as eggs and grow into chicks
-- **Conversation timeline** — See prompts, responses, and tool calls in a threaded view
+- **Sub-agent focus mode** — Select a party member with `Enter` to view their full conversation
 - **Multi-project** — Switch between projects with `[` `]` keys
 - **Multi-AI support** — Claude Code, Codex CLI, Gemini CLI, OpenCode (auto-detected)
-- **Status dots** — Orange (running), green (success), red (error)
-- **HP bar** — Context window usage as health bar
+- **Status dots** — Tool running (colored), success (green ●), error (red ●)
+- **HP bar** — Context window usage as health bar (auto-resets on session rollover)
 - **Dark/Light theme** — Auto-detects or set with `--theme`
+- **Auto-update** — Automatically downloads new versions on startup
+- **Korean IME support** — Keyboard shortcuts work with Korean input mode
 - **Zero config** — Just run `peep`, it auto-discovers AI session logs
+
+## Prerequisites
+
+peep works **out of the box** with no setup required — it automatically watches JSONL log files that AI coding tools write during sessions.
+
+| Tool | Requirement | Notes |
+|------|-------------|-------|
+| **Claude Code** | Just use Claude Code normally | Logs auto-written to `~/.claude/projects/` |
+| **Codex CLI** | Just use Codex normally | Logs auto-written to `~/.codex/sessions/` |
+| **Gemini CLI** | Just use Gemini normally | Logs auto-written to `~/.gemini/logs/sessions/` |
+| **OpenCode** | Coming soon | Will watch `.opencode/logs/` |
+
+**No hooks, no config, no API keys needed.** If your AI tool is writing session logs (which they all do by default), peep will find them.
+
+> **Optional**: For lower-latency events, you can configure [HTTP hooks](#claude-code-http-hooks-optional) — but the JSONL watcher is sufficient for most use cases.
 
 ## Supported AI Tools
 
@@ -42,34 +61,30 @@ peep
 
 ## Installation
 
-### Download binary (easiest)
-
-Download the latest release for your platform:
-
-```bash
-# macOS (Apple Silicon)
-curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-macos-arm64.tar.gz | tar xz
-sudo mv peep /usr/local/bin/
-
-# macOS (Intel)
-curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-macos-intel.tar.gz | tar xz
-sudo mv peep /usr/local/bin/
-
-# Linux (x86_64)
-curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-linux-x86_64.tar.gz | tar xz
-sudo mv peep /usr/local/bin/
-```
-
-### Homebrew (macOS / Linux)
+### Homebrew (recommended)
 
 ```bash
 brew tap jsleemaster/tap
 brew install peep
 ```
 
-### Cargo (from source)
+### Download binary
 
-Requires [Rust](https://rustup.rs/) 1.75+:
+```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-aarch64-apple-darwin.tar.gz | tar xz
+sudo mv peep /usr/local/bin/
+
+# macOS (Intel)
+curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-x86_64-apple-darwin.tar.gz | tar xz
+sudo mv peep /usr/local/bin/
+
+# Linux (x86_64)
+curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-x86_64-unknown-linux-gnu.tar.gz | tar xz
+sudo mv peep /usr/local/bin/
+```
+
+### Cargo (from source)
 
 ```bash
 cargo install --git https://github.com/jsleemaster/peep
@@ -92,6 +107,9 @@ peep --no-jsonl
 
 # Demo with mock data
 peep --mock
+
+# Disable auto-update
+PEEP_NO_AUTO_UPDATE=1 peep
 ```
 
 ## Keyboard Shortcuts
@@ -102,9 +120,12 @@ peep --mock
 | `j` / `k` | Scroll conversation |
 | `[` / `]` | Switch project |
 | `h` / `l` | Focus left/right panel |
+| `Enter` | Focus on selected agent's conversation |
+| `Esc` | Return to leader conversation |
 | `f` | Filter events |
 | `g` / `G` | Scroll to top/bottom |
-| `Enter` | Agent detail overlay |
+
+> Korean IME mode also works — `ㅓ`/`ㅏ`/`ㅗ`/`ㅣ`/`ㅂ`/`ㄹ`/`ㅎ` are mapped to `j`/`k`/`h`/`l`/`q`/`f`/`g`.
 
 ## How It Works
 
@@ -125,6 +146,15 @@ Sub-agents evolve based on their usage count:
 | Peeking | 10-19 | 🐥 Head poking out |
 | Chick | 20+ | 🐣 Fully hatched |
 | Done | completed | ⭐ Trophy |
+
+### Timeline Markers
+
+| Marker | Meaning |
+|--------|---------|
+| `●` | Main agent event |
+| `◆` | Sub-agent event (colored per agent) |
+| `◇` | User prompt |
+| `│` | Timeline spine |
 
 ### Claude Code HTTP Hooks (Optional)
 
@@ -158,11 +188,19 @@ enabled = true
 tick_rate = 100
 ```
 
+## Auto-Update
+
+peep automatically checks for updates on startup and upgrades itself. Disable with:
+
+```bash
+PEEP_NO_AUTO_UPDATE=1 peep
+```
+
 ## Requirements
 
 - **OS**: macOS, Linux (Windows via WSL)
-- **Terminal**: Any terminal with 256-color or truecolor support (iTerm2, Terminal.app, Alacritty, Kitty, WezTerm, etc.)
-- **Rust**: 1.75+ (for building from source)
+- **Terminal**: Any terminal with 256-color or truecolor support
+- **AI Tool**: At least one of Claude Code, Codex CLI, or Gemini CLI actively running
 
 ## License
 
