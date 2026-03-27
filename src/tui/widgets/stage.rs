@@ -768,21 +768,29 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
 
 // --- Helpers ---
 
+fn is_korean_locale() -> bool {
+    std::env::var("LANG")
+        .or_else(|_| std::env::var("LC_ALL"))
+        .or_else(|_| std::env::var("LC_MESSAGES"))
+        .map(|v| v.starts_with("ko"))
+        .unwrap_or(false)
+}
+
 fn format_elapsed(ts: i64, _snap: &StoreSnapshot, is_latest: bool) -> String {
     let now = chrono::Utc::now().timestamp();
     let diff = (now - ts).max(0);
-    let text = if is_latest && diff < 120 {
-        if diff < 60 {
-            format!("{}초", diff)
-        } else {
-            format!("{}분", diff / 60)
-        }
-    } else if diff < 60 {
-        "방금".to_string()
-    } else if diff < 3600 {
-        format!("{}분 전", diff / 60)
-    } else {
-        format!("{}시간 전", diff / 3600)
+    let ko = is_korean_locale();
+    let text = match (is_latest && diff < 120, diff, ko) {
+        (true, 0..=59, true) => format!("{}초", diff),
+        (true, 0..=59, false) => format!("{}s", diff),
+        (true, _, true) => format!("{}분", diff / 60),
+        (true, _, false) => format!("{}m", diff / 60),
+        (false, 0..=59, true) => "방금".to_string(),
+        (false, 0..=59, false) => "now".to_string(),
+        (false, 60..=3599, true) => format!("{}분 전", diff / 60),
+        (false, 60..=3599, false) => format!("{}m ago", diff / 60),
+        (false, _, true) => format!("{}시간 전", diff / 3600),
+        (false, _, false) => format!("{}h ago", diff / 3600),
     };
     // Use display width for correct CJK alignment
     let w = display_width(&text);
