@@ -1,6 +1,6 @@
 [package]
 name = "peep"
-version = "0.4.6"
+version = "0.4.7"
 edition = "2021"
 description = "Peep into your AI coding agents — terminal dashboard with pixel art"
 license = "MIT"
@@ -28,7 +28,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
-reqwest = { version = "0.12", features = ["json"], default-features = false, optional = true }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }
 flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
 unicode-width = "0.2"
