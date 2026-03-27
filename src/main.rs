@@ -97,7 +97,17 @@ async fn main() -> Result<()> {
     };
     crate::tui::theme::init_theme(theme);
 
-    // Background update check
+    // Auto-upgrade: download new binary if available, then re-exec
+    if update::auto_upgrade().await {
+        let exe = std::env::current_exe().unwrap_or_else(|_| "peep".into());
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        use std::os::unix::process::CommandExt;
+        // exec() replaces the current process — does not return on success
+        let err = std::process::Command::new(&exe).args(&args).exec();
+        eprintln!("  re-exec failed: {}, please restart peep manually", err);
+    }
+
+    // Background update check (for notification during session)
     let update_status = update::UpdateStatus::new();
     update_status.check_in_background();
 
