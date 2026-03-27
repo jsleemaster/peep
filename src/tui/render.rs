@@ -11,6 +11,7 @@ use crate::tui::app::App;
 use crate::tui::widgets::{agent_detail, stage, tab_bar};
 
 /// A snapshot of the store for rendering (avoids holding the lock during draw).
+#[allow(dead_code)]
 pub struct StoreSnapshot {
     pub agents: Vec<Agent>,
     pub feed: Vec<FeedEvent>,

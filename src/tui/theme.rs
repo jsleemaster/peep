@@ -8,6 +8,7 @@ pub enum ThemeMode {
 
 /// Color palette that adapts to dark/light mode.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Theme {
     pub mode: ThemeMode,
 
@@ -167,6 +168,7 @@ impl Theme {
 
 impl Theme {
     /// Return the brand color for a given AI tool identifier string.
+    #[allow(dead_code)]
     pub fn ai_tool_color(&self, tool: &str) -> Color {
         match tool {
             "claude" => self.ai_claude,

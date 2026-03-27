@@ -141,7 +141,7 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16) {
         .as_millis() as usize;
 
     // Animated chicken sprite (alternates idle/peck)
-    let chicken_pixels = if (tick / 600) % 2 == 0 {
+    let chicken_pixels = if (tick / 600).is_multiple_of(2) {
         chicken::chicken_idle(tick / 150)
     } else {
         chicken::chicken_peck(tick / 150)
@@ -218,7 +218,7 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16) {
     // Dots animation
     let dots_y = tools_y + 2;
     if dots_y < area.y + area.height {
-        let dot_count = ((tick / 500) % 4) as usize;
+        let dot_count = (tick / 500) % 4;
         let dots = ".".repeat(dot_count);
         let waiting = format!("waiting{:<3}", dots);
         f.render_widget(

@@ -235,7 +235,8 @@ impl AppStore {
         // ----------------------------------------------------------------
         // Agents
         // ----------------------------------------------------------------
-        let agents_raw: &[(&str, &str, AgentState, AgentRole, Option<f64>, &str)] = &[
+        type AgentTuple<'a> = (&'a str, &'a str, AgentState, AgentRole, Option<f64>, &'a str);
+        let agents_raw: &[AgentTuple] = &[
             ("main-worker-0001abcd", "main-worker",  AgentState::Active,    AgentRole::Main,     Some(67.0), "/Users/leeo/evar/platform"),
             ("team-review-0002efgh", "team-review",  AgentState::Waiting,   AgentRole::Team,     Some(22.0), "/Users/leeo/evar/platform"),
             ("sub-scout-0003ijkl",   "sub-scout",    AgentState::Completed, AgentRole::Subagent, None,       "/Users/leeo/peep"),

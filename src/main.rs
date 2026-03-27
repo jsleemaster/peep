@@ -281,7 +281,7 @@ async fn main() -> Result<()> {
                 app.tick += 1;
 
                 // Check update status (non-blocking)
-                if app.update_available.is_none() && app.tick % 50 == 0 {
+                if app.update_available.is_none() && app.tick.is_multiple_of(50) {
                     if let Some(v) = update_status.try_get() {
                         app.update_available = Some(v);
                     }

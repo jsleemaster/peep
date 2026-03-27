@@ -30,6 +30,7 @@ impl UpdateStatus {
     }
 
     /// Get the new version if available (non-blocking).
+    #[allow(dead_code)]
     pub async fn get(&self) -> Option<String> {
         self.inner.lock().await.clone()
     }
