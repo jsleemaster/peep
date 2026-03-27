@@ -35,6 +35,10 @@ pub struct App {
     // Project selection (cwd-based)
     pub current_project: Option<String>,  // selected cwd, None = all
     pub project_index: usize,             // index into project list
+
+    // Sub-agent focus mode: when set, conversation shows only this agent's events
+    pub focused_agent: Option<String>,    // agent_id of focused sub-agent
+    pub pending_focus_select: bool,       // set by Enter key, resolved by renderer
 }
 
 impl App {
@@ -56,6 +60,8 @@ impl App {
             tick: 0,
             current_project: None,
             project_index: 0,
+            focused_agent: None,
+            pending_focus_select: false,
         }
     }
 
@@ -99,10 +105,10 @@ impl App {
             return;
         }
 
-        // Detail overlay dismissal
+        // Detail overlay dismissal (legacy, kept for compatibility)
         if self.show_detail_overlay {
             match key.code {
-                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char('ㅂ') => {
                     self.show_detail_overlay = false;
                 }
                 _ => {}
@@ -110,7 +116,25 @@ impl App {
             return;
         }
 
-        match key.code {
+        // Normalize Korean IME characters to their QWERTY equivalents
+        let code = match key.code {
+            KeyCode::Char('ㅓ') => KeyCode::Char('j'),
+            KeyCode::Char('ㅏ') => KeyCode::Char('k'),
+            KeyCode::Char('ㅗ') => KeyCode::Char('h'),
+            KeyCode::Char('ㅣ') => KeyCode::Char('l'),
+            KeyCode::Char('ㅂ') => KeyCode::Char('q'),
+            KeyCode::Char('ㄹ') => KeyCode::Char('f'),
+            KeyCode::Char('ㅎ') => KeyCode::Char('g'),
+            other => other,
+        };
+
+        // Esc exits focus mode first, then normal behavior
+        if code == KeyCode::Esc && self.focused_agent.is_some() {
+            self.focused_agent = None;
+            return;
+        }
+
+        match code {
             KeyCode::Char('q') => self.running = false,
 
             // Focus switching
@@ -123,10 +147,11 @@ impl App {
             KeyCode::Char('g') => self.scroll_to_top(),
             KeyCode::Char('G') => self.scroll_to_bottom(),
 
-            // Detail overlay
+            // Enter: in sidebar = focus on selected agent's conversation
             KeyCode::Enter => {
                 if self.focus == FocusPane::Sidebar {
-                    self.show_detail_overlay = true;
+                    // agent_id will be resolved by the renderer from sidebar_selected
+                    self.pending_focus_select = true;
                 }
             }
 
@@ -139,6 +164,11 @@ impl App {
             // Project cycling
             KeyCode::Char('[') => self.prev_project(),
             KeyCode::Char(']') => self.next_project(),
+
+            // Esc: exit focus mode or do nothing
+            KeyCode::Esc => {
+                self.focused_agent = None;
+            }
 
             _ => {}
         }

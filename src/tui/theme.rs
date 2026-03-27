@@ -187,6 +187,33 @@ impl Theme {
             _ => "[?]",
         }
     }
+
+    /// Unique color for sub-agent by index (0-based). Cycles through a palette.
+    pub fn sub_agent_color(&self, index: usize) -> Color {
+        let palette = match self.mode {
+            ThemeMode::Dark => &[
+                Color::Rgb(255, 180, 100), // warm orange
+                Color::Rgb(100, 200, 255), // sky blue
+                Color::Rgb(200, 140, 255), // lavender
+                Color::Rgb(255, 140, 180), // pink
+                Color::Rgb(140, 230, 180), // mint
+                Color::Rgb(255, 220, 100), // gold
+                Color::Rgb(180, 200, 255), // periwinkle
+                Color::Rgb(255, 160, 160), // coral
+            ],
+            ThemeMode::Light => &[
+                Color::Rgb(180, 100, 40),  // warm brown
+                Color::Rgb(30, 120, 180),  // deep blue
+                Color::Rgb(120, 60, 180),  // purple
+                Color::Rgb(180, 60, 100),  // rose
+                Color::Rgb(40, 140, 90),   // forest
+                Color::Rgb(160, 130, 0),   // dark gold
+                Color::Rgb(80, 100, 180),  // slate blue
+                Color::Rgb(180, 70, 70),   // brick
+            ],
+        };
+        palette[index % palette.len()]
+    }
 }
 
 /// Global theme access. Set once at startup.

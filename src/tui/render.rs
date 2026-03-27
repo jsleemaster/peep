@@ -38,7 +38,7 @@ impl StoreSnapshot {
     }
 }
 
-pub fn draw(f: &mut Frame, app: &App, snap: &StoreSnapshot) {
+pub fn draw(f: &mut Frame, app: &mut App, snap: &StoreSnapshot) {
     let size = f.area();
 
     // Main layout: header (3) | body (fill)

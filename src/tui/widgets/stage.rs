@@ -2,9 +2,10 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::protocol::types::{AgentRole, AgentState, FeedEvent, RuntimeEventType};
 use crate::store::state::AppStore;
@@ -55,7 +56,7 @@ fn filter_snap_by_project<'a>(
     }
 }
 
-pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
+pub fn render_stage(f: &mut Frame, area: Rect, app: &mut App, snap: &StoreSnapshot) {
     // Fill background
     f.render_widget(
         Paragraph::new("").style(Style::default().bg(bg())),
@@ -65,6 +66,21 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) 
     if snap.agents.is_empty() && snap.feed.is_empty() {
         render_empty_party(f, area, app.port);
         return;
+    }
+
+    // Resolve pending focus select (Enter key on sidebar)
+    if app.pending_focus_select {
+        app.pending_focus_select = false;
+        let (proj_agents, _) = filter_snap_by_project(snap, &app.current_project);
+        if let Some(agent) = proj_agents.get(app.sidebar_selected) {
+            if agent.role == AgentRole::Main && app.focused_agent.is_some() {
+                // Pressing Enter on leader while focused → unfocus
+                app.focused_agent = None;
+            } else if agent.role != AgentRole::Main {
+                app.focused_agent = Some(agent.agent_id.clone());
+                app.feed_auto_scroll = true;
+            }
+        }
     }
 
     // Project tabs + main content
@@ -425,9 +441,10 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             }
         }
 
-        // Name
+        // Name with sub-agent number tag and color
         let name_y = my + spr_lines.len() as u16;
         if name_y < li.y + li.height {
+            let sub_index = i; // 0-based index among party members
             let stage_icon = match stage {
                 "egg" => "\u{1f95a}",
                 "hatching" => "\u{1fab6}",
@@ -436,17 +453,29 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                 "done" => "\u{2b50}",
                 _ => "",
             };
-            let label = format!("{} {}", stage_icon, member.display_name);
-            let color = match stage {
-                "egg" => Color::Rgb(200, 195, 180),
-                "hatching" | "peeking" => Color::Rgb(230, 200, 100),
-                "chick" | "done" => Color::Rgb(255, 220, 80),
-                _ => dim(),
+            let sub_color = theme().sub_agent_color(sub_index);
+            let is_focused = app.focused_agent.as_deref() == Some(&member.agent_id);
+            let tag = format!("[{}{}]", stage_icon, sub_index + 1);
+            let label = format!("{} {}", tag, member.display_name);
+            let color = if is_focused {
+                sub_color
+            } else {
+                match stage {
+                    "egg" => Color::Rgb(200, 195, 180),
+                    "hatching" | "peeking" => Color::Rgb(230, 200, 100),
+                    "chick" | "done" => Color::Rgb(255, 220, 80),
+                    _ => dim(),
+                }
+            };
+            let style = if is_focused {
+                Style::default().fg(color).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(color)
             };
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(
                     format!("{:^width$}", label, width = col_w as usize),
-                    Style::default().fg(color),
+                    style,
                 )))
                 .style(Style::default().bg(card_bg())),
                 Rect::new(mx, name_y, col_w, 1),
@@ -497,15 +526,39 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
 }
 
 fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
-    let (_proj_agents, proj_feed) = filter_snap_by_project(snap, &app.current_project);
+    let (proj_agents, proj_feed) = filter_snap_by_project(snap, &app.current_project);
+
+    // Build sub-agent index map: agent_id → (index, color)
+    let sub_agent_map = build_sub_agent_map(&proj_agents);
+
+    // Focus mode: filter to only focused agent's events
+    let focused = &app.focused_agent;
+    let is_focused = focused.is_some();
+    let feed_iter: Vec<&FeedEvent> = if let Some(ref focused_id) = focused {
+        proj_feed.iter().filter(|e| e.agent_id == *focused_id).copied().collect()
+    } else {
+        proj_feed.to_vec()
+    };
+
+    // Title changes in focus mode
+    let title = if let Some(ref focused_id) = focused {
+        let name = proj_agents.iter()
+            .find(|a| &a.agent_id == focused_id)
+            .map(|a| a.display_name.as_str())
+            .unwrap_or("agent");
+        let idx = sub_agent_map.get(focused_id.as_str()).map(|(i, _)| i + 1).unwrap_or(0);
+        format!(" \u{1f423}{} {} (Esc to return) ", idx, name)
+    } else {
+        " conversation ".to_string()
+    };
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border()))
-        .title(" conversation ")
+        .border_style(Style::default().fg(if is_focused { theme().accent_yellow } else { border() }))
+        .title(title)
         .title_style(
             Style::default()
-                .fg(theme().text_bright)
+                .fg(if is_focused { theme().accent_yellow } else { theme().text_bright })
                 .add_modifier(Modifier::BOLD),
         )
         .style(Style::default().bg(card_bg()));
@@ -517,15 +570,23 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         return;
     }
 
-    // Build conversation timeline: group events by user turns
-    // user prompt → assistant text → tool calls → assistant text → ...
+    // ── Vertical timeline layout ──
+    // All spine markers are 1 cell: ● ◆ ◇ │ → guaranteed alignment
+    // Layout: [elapsed 7dw] [space] [marker 1] [space] [content...]
+    //          0─────────6   7       8          9        10+
     let filter = &app.filter_text;
     let f_lower = filter.to_lowercase();
 
-    let mut lines: Vec<Line> = Vec::new();
-    let last_ts = proj_feed.last().map(|e| e.ts).unwrap_or(0);
+    let max_w = inner.width as usize;
+    let spine_pos = 8usize;
+    let content_start = 10usize;
+    let spine_sep = format!("{}│", " ".repeat(spine_pos));
+    let cont_prefix = format!("{}│{}", " ".repeat(spine_pos), " ".repeat(content_start - spine_pos - 1));
 
-    for event in proj_feed.iter() {
+    let mut lines: Vec<Line> = Vec::new();
+    let last_ts = feed_iter.last().map(|e| e.ts).unwrap_or(0);
+
+    for event in feed_iter.iter() {
         // Apply filter
         if !filter.is_empty() {
             let matches = event.display_name.to_lowercase().contains(&f_lower)
@@ -539,53 +600,83 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         let elapsed = format_elapsed(event.ts, snap, is_latest);
         let is_sub = is_sub_agent(event, snap);
 
+        // Determine 1-cell marker and color
+        let (marker, marker_fg) = if event.event_type == RuntimeEventType::TurnActive {
+            ("\u{25c7}", theme().user_prompt) // ◇ user prompt
+        } else if event.event_type == RuntimeEventType::PermissionWait {
+            ("\u{25cb}", theme().lead_name) // ○ waiting
+        } else if is_sub && !is_focused {
+            let color = sub_agent_map.get(event.agent_id.as_str())
+                .map(|(_, c)| *c)
+                .unwrap_or(theme().sub_agent_text);
+            ("\u{25c6}", color) // ◆ sub-agent (colored)
+        } else {
+            ("\u{25cf}", theme().assistant_text) // ● main agent
+        };
+
+        // Spine separator line
+        lines.push(Line::from(Span::styled(spine_sep.clone(), Style::default().fg(border()))));
+
+        // Build prefix: elapsed + space + marker + space
+        let prefix = vec![
+            Span::styled(elapsed.clone(), Style::default().fg(dim())),
+            Span::styled(" ", Style::default().bg(card_bg())),
+            Span::styled(marker, Style::default().fg(marker_fg)),
+            Span::styled(" ", Style::default().bg(card_bg())),
+        ];
+
+        // Sub-agent tag prefix for content (e.g. "[🐣1] ")
+        let sub_tag_str = if is_sub && !is_focused {
+            sub_agent_map.get(event.agent_id.as_str()).map(|(idx, _)| {
+                let icon = sub_agent_stage_icon(event, snap);
+                format!("[{}{}] ", icon, idx + 1)
+            })
+        } else {
+            None
+        };
+
         match event.event_type {
-            // User prompt = top-level comment with text
+            // User prompt
             RuntimeEventType::TurnActive => {
-                let prompt_text = event.detail.as_deref().unwrap_or("user prompt");
-                lines.push(Line::raw(""));
-                lines.push(Line::from(vec![
-                    Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
-                    Span::styled(" \u{25b6} ", Style::default().fg(theme().user_prompt)),
-                    Span::styled(prompt_text.to_string(), Style::default().fg(theme().user_prompt).add_modifier(Modifier::BOLD)),
-                ]));
+                let text = event.detail.as_deref().unwrap_or("user prompt");
+                let wrapped = wrap_with_tree(
+                    prefix,
+                    text,
+                    Style::default().fg(theme().user_prompt).add_modifier(Modifier::BOLD),
+                    &cont_prefix,
+                    max_w,
+                );
+                lines.extend(wrapped);
             }
 
-            // Assistant text = reply (indented if sub-agent)
+            // Assistant text
             RuntimeEventType::AssistantText => {
                 let text = event.detail.as_deref().unwrap_or("");
                 if text.is_empty() { continue; }
-
-                let (tree, icon, color) = if is_sub {
-                    (" \u{2502} \u{251c}\u{2500}", "\u{1f423} ", theme().sub_agent_text)
-                } else {
-                    (" \u{251c}\u{2500}", "\u{1f414} ", theme().assistant_text)
-                };
-
-                let mut spans = vec![
-                    Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
-                    Span::styled(tree, Style::default().fg(border())),
-                    Span::styled(icon, Style::default().fg(color)),
-                ];
-                if let Some(ai) = event.ai_tool.as_deref() {
-                    let badge = crate::tui::theme::Theme::ai_tool_badge(ai);
-                    let badge_color = theme().ai_tool_color(ai);
-                    spans.push(Span::styled(format!("{} ", badge), Style::default().fg(badge_color)));
+                // Build content: [sub_tag] [badge] text
+                let mut content = String::new();
+                if let Some(ref tag) = sub_tag_str {
+                    content.push_str(tag);
                 }
-                spans.push(Span::styled(text.to_string(), Style::default().fg(color)));
-                lines.push(Line::from(spans));
+                if let Some(ai) = event.ai_tool.as_deref() {
+                    content.push_str(crate::tui::theme::Theme::ai_tool_badge(ai));
+                    content.push(' ');
+                }
+                content.push_str(text);
+                let color = if is_sub && !is_focused {
+                    sub_agent_map.get(event.agent_id.as_str())
+                        .map(|(_, c)| *c)
+                        .unwrap_or(theme().sub_agent_text)
+                } else {
+                    theme().assistant_text
+                };
+                let wrapped = wrap_with_tree(prefix, &content, Style::default().fg(color), &cont_prefix, max_w);
+                lines.extend(wrapped);
             }
 
-            // Tool use = indented action with tree line
+            // Tool start
             RuntimeEventType::ToolStart => {
                 if event.tool_name.is_none() { continue; }
-                let tool_text = format_tool(event);
-                let tree = if is_sub {
-                    " \u{2502} \u{2502} \u{251c}\u{2500}"
-                } else {
-                    " \u{2502} \u{251c}\u{2500}"
-                };
-
                 let t = theme();
                 let tool_color = match event.tool_name.as_deref().unwrap_or("") {
                     "Read" | "Grep" | "Glob" => t.tool_read,
@@ -594,50 +685,46 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                     "Task" | "TaskCreate" | "TaskUpdate" => t.tool_task,
                     _ => t.text,
                 };
-
-                let mut spans = vec![
-                    Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
-                    Span::styled(tree, Style::default().fg(border())),
-                    Span::styled(" \u{2b24} ", Style::default().fg(theme().accent_yellow)), // orange dot = in progress
-                    Span::styled(tool_text, Style::default().fg(tool_color)),
-                ];
-                if let Some(ai) = event.ai_tool.as_deref() {
-                    let badge = crate::tui::theme::Theme::ai_tool_badge(ai);
-                    let color = t.ai_tool_color(ai);
-                    spans.push(Span::styled(format!(" {}", badge), Style::default().fg(color)));
+                let tool_text = format_tool(event);
+                let mut content = String::new();
+                if let Some(ref tag) = sub_tag_str {
+                    content.push_str(tag);
                 }
-
-                lines.push(Line::from(spans));
+                content.push_str(&format!("\u{2b24} {}", tool_text));
+                if let Some(ai) = event.ai_tool.as_deref() {
+                    content.push_str(&format!(" {}", crate::tui::theme::Theme::ai_tool_badge(ai)));
+                }
+                let wrapped = wrap_with_tree(prefix, &content, Style::default().fg(tool_color), &cont_prefix, max_w);
+                lines.extend(wrapped);
             }
 
-            // ToolDone with tool_name
+            // Tool done
             RuntimeEventType::ToolDone if event.tool_name.is_some() => {
                 let tool_text = format_tool(event);
-                let tree = if is_sub {
-                    " \u{2502} \u{2502} \u{2514}\u{2500}"
+                let (done_marker, done_color) = if event.is_error {
+                    ("\u{2717}", theme().accent_red)
                 } else {
-                    " \u{2502} \u{2514}\u{2500}"
+                    ("\u{2713}", theme().accent_green)
                 };
-                let (dot, dot_color) = if event.is_error {
-                    (" \u{2b24} ", theme().accent_red) // red dot = error
-                } else {
-                    (" \u{2b24} ", theme().accent_green) // green dot = success
-                };
-                lines.push(Line::from(vec![
-                    Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
-                    Span::styled(tree, Style::default().fg(border())),
-                    Span::styled(dot, Style::default().fg(dot_color)),
-                    Span::styled(tool_text, Style::default().fg(dim())),
-                ]));
+                let mut content = String::new();
+                if let Some(ref tag) = sub_tag_str {
+                    content.push_str(tag);
+                }
+                content.push_str(&format!("{} {}", done_marker, tool_text));
+                let wrapped = wrap_with_tree(prefix, &content, Style::default().fg(done_color), &cont_prefix, max_w);
+                lines.extend(wrapped);
             }
 
-            // Waiting/permission
+            // Permission wait
             RuntimeEventType::PermissionWait => {
-                lines.push(Line::from(vec![
-                    Span::styled(format!("{}", elapsed), Style::default().fg(dim())),
-                    Span::styled(" \u{23f3} ", Style::default().fg(theme().lead_name)),
-                    Span::styled("waiting for permission...", Style::default().fg(theme().lead_name)),
-                ]));
+                let wrapped = wrap_with_tree(
+                    prefix,
+                    "waiting for permission...",
+                    Style::default().fg(theme().lead_name),
+                    &cont_prefix,
+                    max_w,
+                );
+                lines.extend(wrapped);
             }
 
             _ => {}
@@ -660,7 +747,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     let visible: Vec<Line> = lines[start..end].to_vec();
 
     f.render_widget(
-        Paragraph::new(visible).wrap(Wrap { trim: false }).style(Style::default().bg(card_bg())),
+        Paragraph::new(visible).style(Style::default().bg(card_bg())),
         inner,
     );
 }
@@ -683,7 +770,130 @@ fn format_elapsed(ts: i64, _snap: &StoreSnapshot, is_latest: bool) -> String {
     } else {
         format!("{}시간 전", diff / 3600)
     };
-    format!("{:>7}", text)
+    // Use display width for correct CJK alignment
+    let w = display_width(&text);
+    let pad = 7usize.saturating_sub(w);
+    format!("{}{}", " ".repeat(pad), text)
+}
+
+/// Compute display width of a string (handles CJK, emoji).
+fn display_width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
+/// Wrap a line that has prefix spans + a final text span.
+/// If the line fits in `max_width`, returns it as-is.
+/// Otherwise splits the text content and creates continuation lines
+/// with tree continuation prefix.
+///
+/// `prefix_spans`: everything before the text content (time, tree, icon, tags)
+/// `text`: the text content to wrap
+/// `text_style`: style for the text
+/// `tree_cont`: the tree continuation string for wrapped lines (e.g. " │      ")
+/// `max_width`: available width
+fn wrap_with_tree<'a>(
+    prefix_spans: Vec<Span<'a>>,
+    text: &str,
+    text_style: Style,
+    tree_cont: &str,
+    max_width: usize,
+) -> Vec<Line<'a>> {
+    let prefix_width: usize = prefix_spans.iter().map(|s| display_width(s.content.as_ref())).sum();
+    let text_width = display_width(text);
+
+    // If everything fits on one line, return single line
+    if prefix_width + text_width <= max_width {
+        let mut spans = prefix_spans;
+        spans.push(Span::styled(text.to_string(), text_style));
+        return vec![Line::from(spans)];
+    }
+
+    // Split text into chunks that fit
+    let avail_first = max_width.saturating_sub(prefix_width);
+    let cont_width = display_width(tree_cont);
+    let avail_cont = max_width.saturating_sub(cont_width);
+
+    if avail_first == 0 || avail_cont == 0 {
+        // Terminal too narrow, just push truncated
+        let mut spans = prefix_spans;
+        let truncated = truncate_to_width(text, max_width.saturating_sub(prefix_width).saturating_sub(3));
+        spans.push(Span::styled(format!("{}...", truncated), text_style));
+        return vec![Line::from(spans)];
+    }
+
+    let chunks = split_by_width(text, avail_first, avail_cont);
+    let mut result = Vec::with_capacity(chunks.len());
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        if i == 0 {
+            let mut spans = prefix_spans.clone();
+            spans.push(Span::styled(chunk.to_string(), text_style));
+            result.push(Line::from(spans));
+        } else {
+            result.push(Line::from(vec![
+                Span::styled(tree_cont.to_string(), Style::default().fg(border())),
+                Span::styled(chunk.to_string(), text_style),
+            ]));
+        }
+    }
+
+    result
+}
+
+/// Split text into chunks: first chunk fits `first_width`, rest fit `cont_width`.
+fn split_by_width(text: &str, first_width: usize, cont_width: usize) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut chars = text.chars().peekable();
+    let mut current = String::new();
+    let mut current_w = 0usize;
+    let target_w = first_width;
+
+    // First chunk
+    while let Some(&c) = chars.peek() {
+        let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
+        if current_w + cw > target_w && !current.is_empty() {
+            break;
+        }
+        current.push(c);
+        current_w += cw;
+        chars.next();
+    }
+    chunks.push(current);
+
+    // Remaining chunks
+    while chars.peek().is_some() {
+        let mut chunk = String::new();
+        let mut chunk_w = 0usize;
+        while let Some(&c) = chars.peek() {
+            let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
+            if chunk_w + cw > cont_width && !chunk.is_empty() {
+                break;
+            }
+            chunk.push(c);
+            chunk_w += cw;
+            chars.next();
+        }
+        if !chunk.is_empty() {
+            chunks.push(chunk);
+        }
+    }
+
+    chunks
+}
+
+/// Truncate string to fit within a given display width.
+fn truncate_to_width(s: &str, max_width: usize) -> String {
+    let mut result = String::new();
+    let mut w = 0usize;
+    for c in s.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
+        if w + cw > max_width {
+            break;
+        }
+        result.push(c);
+        w += cw;
+    }
+    result
 }
 
 fn is_sub_agent(e: &FeedEvent, snap: &StoreSnapshot) -> bool {
@@ -694,16 +904,54 @@ fn is_sub_agent(e: &FeedEvent, snap: &StoreSnapshot) -> bool {
         .unwrap_or(true)
 }
 
+/// Build a map of sub-agent agent_id → (index, color) for consistent numbering
+fn build_sub_agent_map<'a>(
+    agents: &[&'a crate::protocol::types::Agent],
+) -> std::collections::HashMap<&'a str, (usize, Color)> {
+    let t = theme();
+    let mut map = std::collections::HashMap::new();
+    let mut idx = 0usize;
+    for agent in agents {
+        if agent.role != AgentRole::Main {
+            let color = t.sub_agent_color(idx);
+            map.insert(agent.agent_id.as_str(), (idx, color));
+            idx += 1;
+        }
+    }
+    map
+}
+
+/// Get the growth stage icon for a sub-agent event
+fn sub_agent_stage_icon(e: &FeedEvent, snap: &StoreSnapshot) -> &'static str {
+    snap.agents
+        .iter()
+        .find(|a| a.agent_id == e.agent_id)
+        .map(|a| {
+            let is_done = a.state == AgentState::Completed;
+            match chicken::agent_growth_stage(a.usage_count, is_done) {
+                "egg" => "\u{1f95a}",
+                "hatching" => "\u{1fab6}",
+                "peeking" => "\u{1f425}",
+                "chick" => "\u{1f423}",
+                "done" => "\u{2b50}",
+                _ => "\u{1f95a}",
+            }
+        })
+        .unwrap_or("\u{1f95a}")
+}
+
 fn format_tool(e: &FeedEvent) -> String {
     let tool = e.tool_name.as_deref().unwrap_or("?");
+    let padded = format!("{:<8}", tool); // fixed 8-char tool name column
     let path = e.file_path.as_deref().unwrap_or("");
-    if path.is_empty() {
-        tool.to_string()
-    } else {
-        // Show last 2-3 path components for context
+    if !path.is_empty() {
         let parts: Vec<&str> = path.rsplit('/').take(3).collect();
         let short_path: String = parts.into_iter().rev().collect::<Vec<_>>().join("/");
-        format!("{} {}", tool, short_path)
+        format!("{} {}", padded, short_path)
+    } else if let Some(ref detail) = e.detail {
+        format!("{} {}", padded, detail)
+    } else {
+        padded.trim_end().to_string()
     }
 }
 
