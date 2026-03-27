@@ -825,42 +825,70 @@ fn wrap_with_tree<'a>(
     max_width: usize,
 ) -> Vec<Line<'a>> {
     let prefix_width: usize = prefix_spans.iter().map(|s| display_width(s.content.as_ref())).sum();
-    let text_width = display_width(text);
-
-    // If everything fits on one line, return single line
-    if prefix_width + text_width <= max_width {
-        let mut spans = prefix_spans;
-        spans.push(Span::styled(text.to_string(), text_style));
-        return vec![Line::from(spans)];
-    }
-
-    // Split text into chunks that fit
-    let avail_first = max_width.saturating_sub(prefix_width);
     let cont_width = display_width(tree_cont);
+    let avail_first = max_width.saturating_sub(prefix_width);
     let avail_cont = max_width.saturating_sub(cont_width);
 
     if avail_first == 0 || avail_cont == 0 {
-        // Terminal too narrow, just push truncated
         let mut spans = prefix_spans;
         let truncated = truncate_to_width(text, max_width.saturating_sub(prefix_width).saturating_sub(3));
         spans.push(Span::styled(format!("{}...", truncated), text_style));
         return vec![Line::from(spans)];
     }
 
-    let chunks = split_by_width(text, avail_first, avail_cont);
-    let mut result = Vec::with_capacity(chunks.len());
+    // Split by newlines first, then by width
+    let mut result: Vec<Line> = Vec::new();
+    let mut is_first = true;
 
-    for (i, chunk) in chunks.iter().enumerate() {
-        if i == 0 {
-            let mut spans = prefix_spans.clone();
-            spans.push(Span::styled(chunk.to_string(), text_style));
-            result.push(Line::from(spans));
-        } else {
-            result.push(Line::from(vec![
-                Span::styled(tree_cont.to_string(), Style::default().fg(border())),
-                Span::styled(chunk.to_string(), text_style),
-            ]));
+    for line_text in text.split('\n') {
+        let trimmed = line_text.trim();
+        if trimmed.is_empty() && !is_first {
+            continue; // skip empty lines in continuation
         }
+
+        let avail = if is_first { avail_first } else { avail_cont };
+        let line_w = display_width(trimmed);
+
+        if line_w <= avail {
+            // Fits on one line
+            if is_first {
+                let mut spans = prefix_spans.clone();
+                spans.push(Span::styled(trimmed.to_string(), text_style));
+                result.push(Line::from(spans));
+                is_first = false;
+            } else {
+                result.push(Line::from(vec![
+                    Span::styled(tree_cont.to_string(), Style::default().fg(border())),
+                    Span::styled(trimmed.to_string(), text_style),
+                ]));
+            }
+        } else {
+            // Need width-based wrapping
+            let chunks = if is_first {
+                split_by_width(trimmed, avail_first, avail_cont)
+            } else {
+                split_by_width(trimmed, avail_cont, avail_cont)
+            };
+            for chunk in &chunks {
+                if is_first {
+                    let mut spans = prefix_spans.clone();
+                    spans.push(Span::styled(chunk.to_string(), text_style));
+                    result.push(Line::from(spans));
+                    is_first = false;
+                } else {
+                    result.push(Line::from(vec![
+                        Span::styled(tree_cont.to_string(), Style::default().fg(border())),
+                        Span::styled(chunk.to_string(), text_style),
+                    ]));
+                }
+            }
+        }
+    }
+
+    if result.is_empty() {
+        let mut spans = prefix_spans;
+        spans.push(Span::styled("", text_style));
+        result.push(Line::from(spans));
     }
 
     result
