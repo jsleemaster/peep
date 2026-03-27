@@ -455,7 +455,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             };
             let sub_color = theme().sub_agent_color(sub_index);
             let is_focused = app.focused_agent.as_deref() == Some(&member.agent_id);
-            let tag = format!("[{}{}]", stage_icon, sub_index + 1);
+            let tag = format!("[{}]", stage_icon);
             let label = format!("{} {}", tag, member.display_name);
             let color = if is_focused {
                 sub_color
@@ -652,7 +652,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         let sub_tag_str = if is_sub && !is_focused {
             sub_agent_map.get(event.agent_id.as_str()).map(|(idx, _)| {
                 let icon = sub_agent_stage_icon(event, snap);
-                format!("[{}{}] ", icon, idx + 1)
+                format!("[{}] ", icon)
             })
         } else {
             None
