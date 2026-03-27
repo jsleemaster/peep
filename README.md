@@ -4,22 +4,7 @@
 
 Terminal dashboard that monitors AI coding agents in real-time. Watch your agents work with pixel-art characters, conversation timelines, and multi-project support.
 
-```
-peep
- ●1 ◐0 │ 🐔1 🐣1 │ tokens:168.8k │ $0.00         q:quit j/k:scroll [,]:project
-┌──────────────────────┬─────────────────────────────────────────────────────────┐
-│ refactored-badger LEAD│ conversation                                           │
-│                      │        │                                                │
-│     🐔               │  방금  ◇ auth module 리팩토링 해줘                      │
-│                      │        │                                                │
-│ HP ████████░░ 83%    │  방금  ● [C] 네, auth module을 확인하겠습니다.          │
-│                      │        │                                                │
-│ ── party (1) ──────  │  방금  ● ●  Read     src/auth.ts                       │
-│  🥚 sub-worker      │        │                                                │
-│     hatching...      │  방금  ● ●  Read     src/config.ts                     │
-│                      │        │                                                │
-└──────────────────────┴─────────────────────────────────────────────────────────┘
-```
+![peep screenshot](assets/screenshot.png)
 
 ## Features
 
