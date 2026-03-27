@@ -72,10 +72,10 @@ pub async fn auto_upgrade() -> bool {
 
     // Determine platform asset name
     let asset_name = match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "aarch64") => "peep-aarch64-apple-darwin.tar.gz",
-        ("macos", "x86_64") => "peep-x86_64-apple-darwin.tar.gz",
-        ("linux", "x86_64") => "peep-x86_64-unknown-linux-gnu.tar.gz",
-        ("linux", "aarch64") => "peep-aarch64-unknown-linux-gnu.tar.gz",
+        ("macos", "aarch64") => "peep-macos-arm64.tar.gz",
+        ("macos", "x86_64") => "peep-macos-intel.tar.gz",
+        ("linux", "x86_64") => "peep-linux-x86_64.tar.gz",
+        ("linux", "aarch64") => "peep-linux-arm64.tar.gz",
         _ => {
             eprintln!("  unsupported platform, skipping auto-upgrade");
             return false;
