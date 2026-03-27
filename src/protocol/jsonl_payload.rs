@@ -148,7 +148,8 @@ fn parse_jsonl_line_inner(line: &str) -> Option<RawIngestEvent> {
                         let detail = block
                             .get("input")
                             .and_then(|i| {
-                                i.get("command")
+                                i.get("skill")       // Skill tool: skill name
+                                    .or_else(|| i.get("command"))
                                     .or_else(|| i.get("description"))
                                     .or_else(|| i.get("content"))
                                     .or_else(|| i.get("query"))
