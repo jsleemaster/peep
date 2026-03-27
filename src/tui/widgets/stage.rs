@@ -717,11 +717,12 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 lines.extend(wrapped);
             }
 
-            // Tool done
+            // Tool done — text color matches dot (green/red)
             RuntimeEventType::ToolDone if event.tool_name.is_some() => {
                 let tool_text = format_tool(event);
                 let content = tool_text;
-                let wrapped = wrap_with_tree(prefix, &content, Style::default().fg(dim()), &cont_prefix, max_w);
+                let done_text_color = if event.is_error { theme().accent_red } else { theme().accent_green };
+                let wrapped = wrap_with_tree(prefix, &content, Style::default().fg(done_text_color), &cont_prefix, max_w);
                 lines.extend(wrapped);
             }
 
