@@ -607,29 +607,26 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         } else if event.event_type == RuntimeEventType::PermissionWait {
             ("\u{23f3}", theme().lead_name) // ⏳ waiting
         } else if is_sub && !is_focused {
-            ("\u{1f423}", theme().sub_agent_text) // 🐣 sub-agent
+            // Use per-agent color from palette
+            let color = sub_agent_map.get(event.agent_id.as_str())
+                .map(|(_, c)| *c)
+                .unwrap_or(theme().sub_agent_text);
+            ("\u{1f423}", color) // 🐣 sub-agent (unique color)
         } else {
             ("\u{1f414}", theme().assistant_text) // 🐔 main agent
         };
 
-        // Status badge dot for tool events (placed in content)
+        // Status badge dot for tool events
+        // ToolStart: always yellow (in progress), ToolDone: green/red
         let tool_badge: Option<(&str, Color)> = match event.event_type {
             RuntimeEventType::ToolStart => {
-                let t = theme();
-                let tc = match event.tool_name.as_deref().unwrap_or("") {
-                    "Read" | "Grep" | "Glob" => t.tool_read,
-                    "Edit" | "Write" => t.tool_edit,
-                    "Bash" => t.tool_bash,
-                    "Task" | "TaskCreate" | "TaskUpdate" => t.tool_task,
-                    _ => t.accent_yellow,
-                };
-                Some(("\u{25cf}", tc)) // ● colored
+                Some(("\u{25cf}", theme().accent_yellow)) // ● yellow = in progress
             }
             RuntimeEventType::ToolDone => {
                 if event.is_error {
-                    Some(("\u{25cf}", theme().accent_red)) // ● red
+                    Some(("\u{25cf}", theme().accent_red)) // ● red = error
                 } else {
-                    Some(("\u{25cf}", theme().accent_green)) // ● green
+                    Some(("\u{25cf}", theme().accent_green)) // ● green = success
                 }
             }
             _ => None,
@@ -640,23 +637,30 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
             lines.push(Line::from(Span::styled(spine_sep.clone(), Style::default().fg(border()))));
         }
 
+        // Elapsed color: "N초째/N분째" = yellow (active), others = dim
+        let elapsed_color = if is_latest && {
+            let now = chrono::Utc::now().timestamp();
+            (now - event.ts).abs() < 120
+        } {
+            theme().accent_yellow
+        } else {
+            dim()
+        };
+
         // Build prefix: elapsed + space + marker + space
         let mut prefix = vec![
-            Span::styled(elapsed.clone(), Style::default().fg(dim())),
+            Span::styled(elapsed.clone(), Style::default().fg(elapsed_color)),
             Span::styled(" ", Style::default().bg(card_bg())),
             Span::styled(marker, Style::default().fg(marker_fg)),
             Span::styled(" ", Style::default().bg(card_bg())),
         ];
 
-        // Sub-agent tag prefix for content (e.g. "[🐣1] ")
-        let sub_tag_str = if is_sub && !is_focused {
-            sub_agent_map.get(event.agent_id.as_str()).map(|(_, _)| {
-                let icon = sub_agent_stage_icon(event, snap);
-                format!("[{}] ", icon)
-            })
-        } else {
-            None
-        };
+        // Add badge dot right after marker (before content) for tool events
+        if let Some((dot, dot_color)) = tool_badge {
+            prefix.push(Span::styled(format!("{} ", dot), Style::default().fg(dot_color)));
+        }
+
+        // Sub-agent tag no longer needed in content — spine emoji distinguishes agents
 
         match event.event_type {
             // User prompt
@@ -676,11 +680,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
             RuntimeEventType::AssistantText => {
                 let text = event.detail.as_deref().unwrap_or("");
                 if text.is_empty() { continue; }
-                // Build content: [sub_tag] [badge] text
                 let mut content = String::new();
-                if let Some(ref tag) = sub_tag_str {
-                    content.push_str(tag);
-                }
                 if let Some(ai) = event.ai_tool.as_deref() {
                     content.push_str(crate::tui::theme::Theme::ai_tool_badge(ai));
                     content.push(' ');
@@ -697,7 +697,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 lines.extend(wrapped);
             }
 
-            // Tool start — badge dot as separate colored span in prefix
+            // Tool start
             RuntimeEventType::ToolStart => {
                 if event.tool_name.is_none() { continue; }
                 let t = theme();
@@ -709,15 +709,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                     _ => t.text,
                 };
                 let tool_text = format_tool(event);
-                // Add badge dot to prefix with its own color
-                if let Some((dot, dot_color)) = tool_badge {
-                    prefix.push(Span::styled(format!("{} ", dot), Style::default().fg(dot_color)));
-                }
-                let mut content = String::new();
-                if let Some(ref tag) = sub_tag_str {
-                    content.push_str(tag);
-                }
-                content.push_str(&tool_text);
+                let mut content = tool_text;
                 if let Some(ai) = event.ai_tool.as_deref() {
                     content.push_str(&format!(" {}", crate::tui::theme::Theme::ai_tool_badge(ai)));
                 }
@@ -725,17 +717,10 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
                 lines.extend(wrapped);
             }
 
-            // Tool done — badge dot as separate colored span in prefix
+            // Tool done
             RuntimeEventType::ToolDone if event.tool_name.is_some() => {
                 let tool_text = format_tool(event);
-                if let Some((dot, dot_color)) = tool_badge {
-                    prefix.push(Span::styled(format!("{} ", dot), Style::default().fg(dot_color)));
-                }
-                let mut content = String::new();
-                if let Some(ref tag) = sub_tag_str {
-                    content.push_str(tag);
-                }
-                content.push_str(&tool_text);
+                let content = tool_text;
                 let wrapped = wrap_with_tree(prefix, &content, Style::default().fg(dim()), &cont_prefix, max_w);
                 lines.extend(wrapped);
             }
@@ -975,6 +960,7 @@ fn build_sub_agent_map<'a>(
 }
 
 /// Get the growth stage icon for a sub-agent event
+#[allow(dead_code)]
 fn sub_agent_stage_icon(e: &FeedEvent, snap: &StoreSnapshot) -> &'static str {
     snap.agents
         .iter()

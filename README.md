@@ -103,12 +103,14 @@ PEEP_NO_AUTO_UPDATE=1 peep
 |-----|--------|
 | `q` | Quit |
 | `j` / `k` | Scroll conversation |
-| `[` / `]` | Switch project |
 | `h` / `l` | Focus left/right panel |
-| `Enter` | Focus on selected agent's conversation |
+| `[` / `]` | Switch project |
+| `Enter` | Focus on selected sub-agent (left panel) |
 | `Esc` | Return to leader conversation |
 | `f` | Filter events |
 | `g` / `G` | Scroll to top/bottom |
+
+> **Sub-agent focus**: Press `h` to move focus to the left panel, `j`/`k` to select a party member, then `Enter` to view only that agent's conversation. Press `Esc` to return.
 
 > Korean IME mode also works — `ㅓ`/`ㅏ`/`ㅗ`/`ㅣ`/`ㅂ`/`ㄹ`/`ㅎ` are mapped to `j`/`k`/`h`/`l`/`q`/`f`/`g`.
 
