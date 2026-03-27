@@ -574,12 +574,12 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     // Spine: emoji icons (🐔🐣◇) on event lines, │ between events
     // Layout: [elapsed 7dw] [space] [emoji 2dw] [space] [content...]
     //          0─────────6   7       8─────9     10       11+
-    // │ at position 8, content at position 11
+    // │ at position 9 (right edge of 2-cell emoji at 8-9), content at 11
     let filter = &app.filter_text;
     let f_lower = filter.to_lowercase();
 
     let max_w = inner.width as usize;
-    let spine_pos = 8usize;
+    let spine_pos = 9usize;
     let content_start = 11usize;
     let spine_sep = format!("{}│", " ".repeat(spine_pos));
     let cont_prefix = format!("{}│{}", " ".repeat(spine_pos), " ".repeat(content_start - spine_pos - 1));
