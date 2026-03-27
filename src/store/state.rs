@@ -85,6 +85,7 @@ impl AppStore {
                 current_skill: skill,
                 branch_name: raw.branch_name.clone(),
                 skill_usage: HashMap::new(),
+                skills_invoked: HashMap::new(),
                 total_tokens: 0,
                 usage_count: 0,
                 tool_run_count: 0,
@@ -121,6 +122,14 @@ impl AppStore {
 
         if raw.tool_name.is_some() {
             agent.tool_run_count += 1;
+        }
+
+        // Track Skill tool invocations (e.g. "commit", "superpowers:brainstorming")
+        if raw.tool_name.as_deref() == Some("Skill") {
+            if let Some(ref detail) = raw.detail {
+                let skill_name = detail.split_whitespace().next().unwrap_or(detail);
+                *agent.skills_invoked.entry(skill_name.to_string()).or_insert(0) += 1;
+            }
         }
 
         let display_name = agent.display_name.clone();
@@ -271,6 +280,7 @@ impl AppStore {
                     current_skill: if *state == AgentState::Active { Some(SkillKind::Edit) } else { None },
                     branch_name:   Some(format!("feat/{name}")),
                     skill_usage,
+                    skills_invoked: HashMap::new(),
                     total_tokens:  42_000,
                     usage_count:   28,
                     tool_run_count: 28,

@@ -119,6 +119,7 @@ pub struct Agent {
     pub current_skill: Option<SkillKind>,
     pub branch_name: Option<String>,
     pub skill_usage: HashMap<SkillKind, u64>,
+    pub skills_invoked: HashMap<String, u64>, // Skill tool invocations: "commit" → 3
     pub total_tokens: u64,
     pub usage_count: u64,
     pub tool_run_count: u64,

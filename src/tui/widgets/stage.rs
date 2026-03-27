@@ -353,6 +353,31 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         y += 1;
     }
 
+    // Skills invoked by leader
+    if !leader.skills_invoked.is_empty() && y < li.y + li.height {
+        y += 1;
+        let mut skills: Vec<_> = leader.skills_invoked.iter().collect();
+        skills.sort_by(|a, b| b.1.cmp(a.1)); // most used first
+        let skills_text: String = skills.iter()
+            .take(3) // top 3
+            .map(|(name, count)| {
+                // shorten "superpowers:brainstorming" → "brainstorming"
+                let short = name.rsplit(':').next().unwrap_or(name);
+                format!("{} ×{}", short, count)
+            })
+            .collect::<Vec<_>>()
+            .join("  ");
+        let skills_line = Line::from(vec![
+            Span::styled(" ⚡ ", Style::default().fg(theme().accent_yellow)),
+            Span::styled(skills_text, Style::default().fg(dim())),
+        ]);
+        f.render_widget(
+            Paragraph::new(skills_line).style(Style::default().bg(card_bg())),
+            Rect::new(li.x, y, li.width, 1),
+        );
+        y += 1;
+    }
+
     // Party separator
     let party_members: Vec<_> = proj_agents
         .iter()
@@ -485,10 +510,9 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             );
         }
 
-        // State / tool + mini speech bubble
+        // State text — truncate with display width, no "Other"
         let state_y = name_y + 1;
         if state_y < li.y + li.height {
-            // Find latest activity for this member
             let latest_text = snap
                 .feed
                 .iter()
@@ -496,17 +520,26 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                 .find(|e| e.agent_id == member.agent_id && e.detail.is_some())
                 .and_then(|e| e.detail.as_deref());
 
+            let max_text_w = (col_w as usize).saturating_sub(4); // padding
             let display_text = if let Some(tool) = &member.current_skill {
                 format!("{}", tool)
             } else if let Some(text) = latest_text {
-                let chars: Vec<char> = text.chars().collect();
-                if chars.len() > (col_w as usize).saturating_sub(2) {
-                    chars[..(col_w as usize).saturating_sub(5)].iter().collect::<String>() + "..."
-                } else {
-                    text.to_string()
-                }
+                truncate_to_width(text.split('\n').next().unwrap_or(text), max_text_w)
             } else {
-                format!("{}", member.state)
+                match member.state {
+                    AgentState::Active => "working...".to_string(),
+                    AgentState::Waiting => "waiting".to_string(),
+                    AgentState::Completed => "done".to_string(),
+                }
+            };
+
+            // Add "..." if truncated
+            let display = if display_width(&display_text) < display_width(latest_text.unwrap_or(""))
+                && !display_text.ends_with("...")
+            {
+                format!("{}...", display_text)
+            } else {
+                display_text
             };
 
             let sc = if is_done {
@@ -518,7 +551,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             };
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(
-                    format!("{:^width$}", display_text, width = col_w as usize),
+                    format!("{:^width$}", display, width = col_w as usize),
                     Style::default().fg(sc),
                 )))
                 .style(Style::default().bg(card_bg())),
