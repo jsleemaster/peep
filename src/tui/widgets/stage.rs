@@ -773,9 +773,9 @@ fn format_elapsed(ts: i64, _snap: &StoreSnapshot, is_latest: bool) -> String {
     let diff = (now - ts).max(0);
     let text = if is_latest && diff < 120 {
         if diff < 60 {
-            format!("{}초째", diff)
+            format!("{}초", diff)
         } else {
-            format!("{}분째", diff / 60)
+            format!("{}분", diff / 60)
         }
     } else if diff < 60 {
         "방금".to_string()
