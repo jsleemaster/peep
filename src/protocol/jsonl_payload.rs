@@ -6,6 +6,27 @@ use super::types::{IngestSource, RawIngestEvent, RuntimeEventType};
 /// Parse a single JSONL line from a Claude Code session file into a `RawIngestEvent`.
 /// Returns `None` for lines that are empty, unparseable, or carry no actionable event.
 pub fn parse_jsonl_line(line: &str) -> Option<RawIngestEvent> {
+    let mut event = parse_jsonl_line_inner(line)?;
+
+    // Post-process: detect sub-agent from isSidechain/agentId or file path markers
+    let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    let is_sidechain = v.get("isSidechain").and_then(|b| b.as_bool()).unwrap_or(false);
+    if is_sidechain {
+        if let Some(agent_id) = v.get("agentId").and_then(|s| s.as_str()) {
+            // Use session_id + agentId as unique sub-agent identifier
+            let sub_id = format!("{}-{}", event.agent_runtime_id, agent_id);
+            event.session_runtime_id = Some(event.agent_runtime_id.clone());
+            event.agent_runtime_id = sub_id;
+            if event.hook_event_name.as_deref() != Some("AgentSpawn") {
+                event.hook_event_name = Some("Subagent".into());
+            }
+        }
+    }
+
+    Some(event)
+}
+
+fn parse_jsonl_line_inner(line: &str) -> Option<RawIngestEvent> {
     let line = line.trim();
     if line.is_empty() {
         return None;

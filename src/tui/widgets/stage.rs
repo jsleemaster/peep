@@ -650,7 +650,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
 
         // Sub-agent tag prefix for content (e.g. "[🐣1] ")
         let sub_tag_str = if is_sub && !is_focused {
-            sub_agent_map.get(event.agent_id.as_str()).map(|(idx, _)| {
+            sub_agent_map.get(event.agent_id.as_str()).map(|(_, _)| {
                 let icon = sub_agent_stage_icon(event, snap);
                 format!("[{}] ", icon)
             })

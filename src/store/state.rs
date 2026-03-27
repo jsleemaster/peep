@@ -57,9 +57,14 @@ impl AppStore {
         let agent = self.agents.entry(agent_id.clone()).or_insert_with(|| {
             // Sub-agents: use description part (before |) as name
             // Others: slug > session_runtime_id > short_id
-            let display_name = if raw.hook_event_name.as_deref() == Some("AgentSpawn") {
+            let is_sub = matches!(
+                raw.hook_event_name.as_deref(),
+                Some("AgentSpawn") | Some("Subagent")
+            );
+            let display_name = if is_sub {
                 raw.detail.as_deref()
                     .and_then(|d| d.split(" | ").next())
+                    .or(raw.slug.as_deref())
                     .unwrap_or(&short_id)
                     .to_string()
             } else {
@@ -72,7 +77,7 @@ impl AppStore {
                 display_name,
                 short_id: short_id.clone(),
                 state: new_state,
-                role: if raw.hook_event_name.as_deref() == Some("AgentSpawn") {
+                role: if is_sub {
                     AgentRole::Subagent
                 } else {
                     AgentRole::Main
