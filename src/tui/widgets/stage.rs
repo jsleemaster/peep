@@ -402,163 +402,182 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         y += 1;
     }
 
-    // Party members in 2-column grid
-    let cols = 2u16;
-    let col_w = li.width / cols;
-    let row_h = 8u16;
+    // Adaptive: sprite grid for ≤4 members, compact list for 5+
+    let remaining_h = (li.y + li.height).saturating_sub(y) as usize;
+    let use_compact = party_members.len() > 4 || remaining_h < 16;
 
-    for (i, member) in party_members.iter().enumerate() {
-        let col = (i as u16) % cols;
-        let row = (i as u16) / cols;
-        let mx = li.x + col * col_w;
-        let my = y + row * row_h;
-
-        if my + row_h > li.y + li.height {
-            break;
-        }
-
-        let is_done = member.state == AgentState::Completed;
-        let is_waiting = member.state == AgentState::Waiting;
-        let stage = chicken::agent_growth_stage(member.usage_count, is_done);
-
-        // Sprite
-        let sprite = match stage {
-            "egg" => chicken::egg_sprite(),
-            "hatching" => chicken::egg_cracking(tick / 3),
-            "peeking" => chicken::egg_hatching_chick(tick / 3),
-            "chick" if is_waiting => chicken::chick_sleeping(tick),
-            "chick" => chicken::chick_sprite(tick / 3),
-            "done" => chicken::chick_done(),
-            _ => chicken::egg_sprite(),
-        };
-
-        let spr_lines = sprite_to_lines(&sprite, card_bg());
-        let spr_w = if stage == "egg" || stage == "hatching" {
-            12u16
-        } else {
-            16u16
-        };
-        let spr_x = mx + (col_w.saturating_sub(spr_w)) / 2;
-
-        for (j, line) in spr_lines.iter().enumerate() {
-            let sy = my + j as u16;
-            if sy < li.y + li.height {
-                f.render_widget(
-                    Paragraph::new(line.clone()).style(Style::default().bg(card_bg())),
-                    Rect::new(spr_x, sy, spr_w, 1),
-                );
+    if use_compact {
+        // ── Compact list mode: 1 line per agent ──
+        for (i, member) in party_members.iter().enumerate() {
+            if y >= li.y + li.height {
+                break;
             }
-        }
 
-        // Zzz for waiting
-        if is_waiting && stage == "chick" {
-            let zzz_frame = (tick / 10) % 4;
-            let zzz = ["z", " zz", "  zzz", " zz"][zzz_frame];
-            if spr_x + spr_w + 5 <= li.x + li.width {
-                f.render_widget(
-                    Paragraph::new(Line::from(Span::styled(
-                        zzz,
-                        Style::default().fg(dim()),
-                    )))
-                    .style(Style::default().bg(card_bg())),
-                    Rect::new(spr_x + spr_w, my, 5, 1),
-                );
-            }
-        }
-
-        // Name with sub-agent number tag and color
-        let name_y = my + spr_lines.len() as u16;
-        if name_y < li.y + li.height {
-            let sub_index = i; // 0-based index among party members
+            let is_done = member.state == AgentState::Completed;
+            let stage = chicken::agent_growth_stage(member.usage_count, is_done);
             let stage_icon = match stage {
                 "egg" => "\u{1f95a}",
                 "hatching" => "\u{1fab6}",
                 "peeking" => "\u{1f425}",
                 "chick" => "\u{1f423}",
                 "done" => "\u{2b50}",
-                _ => "",
+                _ => "\u{1f95a}",
             };
-            let sub_color = theme().sub_agent_color(sub_index);
+            let sub_color = theme().sub_agent_color(i);
             let is_focused = app.focused_agent.as_deref() == Some(&member.agent_id);
-            // sidebar_selected: 0 = leader, 1+ = party members (1-indexed)
             let is_selected = app.focus == crate::tui::app::FocusPane::Sidebar
-                && app.sidebar_selected == i + 1; // +1 because 0 is leader
-            let tag = format!("[{}]", stage_icon);
-            let label = format!("{} {}", tag, member.display_name);
-            let color = if is_focused || is_selected {
-                sub_color
-            } else {
-                match stage {
-                    "egg" => Color::Rgb(200, 195, 180),
-                    "hatching" | "peeking" => Color::Rgb(230, 200, 100),
-                    "chick" | "done" => Color::Rgb(255, 220, 80),
-                    _ => dim(),
-                }
-            };
-            let style = if is_focused || is_selected {
-                Style::default().fg(color).bg(Color::Rgb(40, 40, 60)).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(color)
-            };
-            f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    format!("{:^width$}", label, width = col_w as usize),
-                    style,
-                )))
-                .style(Style::default().bg(card_bg())),
-                Rect::new(mx, name_y, col_w, 1),
-            );
-        }
+                && app.sidebar_selected == i + 1;
 
-        // State text — truncate with display width, no "Other"
-        let state_y = name_y + 1;
-        if state_y < li.y + li.height {
-            let latest_text = snap
-                .feed
-                .iter()
-                .rev()
-                .find(|e| e.agent_id == member.agent_id && e.detail.is_some())
-                .and_then(|e| e.detail.as_deref());
-
-            let max_text_w = (col_w as usize).saturating_sub(4); // padding
-            let display_text = if let Some(tool) = &member.current_skill {
+            // Status text
+            let status = if let Some(tool) = &member.current_skill {
                 format!("{}", tool)
-            } else if let Some(text) = latest_text {
-                truncate_to_width(text.split('\n').next().unwrap_or(text), max_text_w)
             } else {
                 match member.state {
-                    AgentState::Active => "working...".to_string(),
+                    AgentState::Active => "working".to_string(),
                     AgentState::Waiting => "waiting".to_string(),
                     AgentState::Completed => "done".to_string(),
                 }
             };
 
-            // Add "..." if truncated
-            let display = if display_width(&display_text) < display_width(latest_text.unwrap_or(""))
-                && !display_text.ends_with("...")
-            {
-                format!("{}...", display_text)
+            // Truncate name to fit
+            let max_name_w = (li.width as usize).saturating_sub(status.len() + 6);
+            let short_name = truncate_to_width(&member.display_name, max_name_w);
+
+            let color = if is_focused || is_selected { sub_color } else { dim() };
+            let style = if is_focused || is_selected {
+                Style::default().fg(color).bg(Color::Rgb(40, 40, 60)).add_modifier(Modifier::BOLD)
             } else {
-                display_text
+                Style::default().fg(color)
             };
 
-            let sc = if is_done {
-                dim()
-            } else if is_waiting {
-                theme().accent_yellow
-            } else {
-                theme().accent_green
+            let status_color = match member.state {
+                AgentState::Active => theme().accent_green,
+                AgentState::Waiting => theme().accent_yellow,
+                AgentState::Completed => dim(),
             };
+
+            let line = Line::from(vec![
+                Span::styled(format!(" {} ", stage_icon), style),
+                Span::styled(short_name, style),
+                Span::styled(" ", Style::default().bg(card_bg())),
+                Span::styled(status, Style::default().fg(status_color)),
+            ]);
             f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    format!("{:^width$}", display, width = col_w as usize),
-                    Style::default().fg(sc),
-                )))
-                .style(Style::default().bg(card_bg())),
+                Paragraph::new(line).style(Style::default().bg(card_bg())),
+                Rect::new(li.x, y, li.width, 1),
+            );
+            y += 1;
+        }
+    } else {
+        // ── Sprite grid mode: 2-column grid with pixel art ──
+        let cols = 2u16;
+        let col_w = li.width / cols;
+        let row_h = 8u16;
+
+        for (i, member) in party_members.iter().enumerate() {
+            let col = (i as u16) % cols;
+            let row = (i as u16) / cols;
+            let mx = li.x + col * col_w;
+            let my = y + row * row_h;
+
+            if my + row_h > li.y + li.height {
+                break;
+            }
+
+            let is_done = member.state == AgentState::Completed;
+            let is_waiting = member.state == AgentState::Waiting;
+            let stage = chicken::agent_growth_stage(member.usage_count, is_done);
+
+            let sprite = match stage {
+                "egg" => chicken::egg_sprite(),
+                "hatching" => chicken::egg_cracking(tick / 3),
+                "peeking" => chicken::egg_hatching_chick(tick / 3),
+                "chick" if is_waiting => chicken::chick_sleeping(tick),
+                "chick" => chicken::chick_sprite(tick / 3),
+                "done" => chicken::chick_done(),
+                _ => chicken::egg_sprite(),
+            };
+
+            let spr_lines = sprite_to_lines(&sprite, card_bg());
+            let spr_w = if stage == "egg" || stage == "hatching" { 12u16 } else { 16u16 };
+            let spr_x = mx + (col_w.saturating_sub(spr_w)) / 2;
+
+            for (j, line) in spr_lines.iter().enumerate() {
+                let sy = my + j as u16;
+                if sy < li.y + li.height {
+                    f.render_widget(
+                        Paragraph::new(line.clone()).style(Style::default().bg(card_bg())),
+                        Rect::new(spr_x, sy, spr_w, 1),
+                    );
+                }
+            }
+
+            if is_waiting && stage == "chick" {
+                let zzz_frame = (tick / 10) % 4;
+                let zzz = ["z", " zz", "  zzz", " zz"][zzz_frame];
+                if spr_x + spr_w + 5 <= li.x + li.width {
+                    f.render_widget(
+                        Paragraph::new(Line::from(Span::styled(zzz, Style::default().fg(dim()))))
+                            .style(Style::default().bg(card_bg())),
+                        Rect::new(spr_x + spr_w, my, 5, 1),
+                    );
+                }
+            }
+
+            let name_y = my + spr_lines.len() as u16;
+            if name_y < li.y + li.height {
+                let stage_icon = match stage {
+                    "egg" => "\u{1f95a}", "hatching" => "\u{1fab6}", "peeking" => "\u{1f425}",
+                    "chick" => "\u{1f423}", "done" => "\u{2b50}", _ => "",
+                };
+                let sub_color = theme().sub_agent_color(i);
+                let is_focused = app.focused_agent.as_deref() == Some(&member.agent_id);
+                let is_selected = app.focus == crate::tui::app::FocusPane::Sidebar
+                    && app.sidebar_selected == i + 1;
+                let label = format!("[{}] {}", stage_icon, member.display_name);
+                let color = if is_focused || is_selected { sub_color } else {
+                    match stage {
+                        "egg" => Color::Rgb(200, 195, 180),
+                        "hatching" | "peeking" => Color::Rgb(230, 200, 100),
+                        "chick" | "done" => Color::Rgb(255, 220, 80),
+                        _ => dim(),
+                    }
+                };
+                let style = if is_focused || is_selected {
+                    Style::default().fg(color).bg(Color::Rgb(40, 40, 60)).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(color)
+                };
+                f.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        format!("{:^width$}", label, width = col_w as usize), style,
+                    ))).style(Style::default().bg(card_bg())),
+                    Rect::new(mx, name_y, col_w, 1),
+                );
+            }
+
+            let state_y = name_y + 1;
+            if state_y < li.y + li.height {
+                let status = if let Some(tool) = &member.current_skill {
+                    format!("{}", tool)
+                } else {
+                    match member.state {
+                        AgentState::Active => "working...".to_string(),
+                        AgentState::Waiting => "waiting".to_string(),
+                        AgentState::Completed => "done".to_string(),
+                    }
+                };
+                let sc = if is_done { dim() } else if is_waiting { theme().accent_yellow } else { theme().accent_green };
+                f.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        format!("{:^width$}", status, width = col_w as usize),
+                        Style::default().fg(sc),
+                    ))).style(Style::default().bg(card_bg())),
                 Rect::new(mx, state_y, col_w, 1),
             );
         }
     }
+    } // end adaptive party
 }
 
 fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
