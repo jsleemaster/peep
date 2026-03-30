@@ -633,7 +633,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     let filter = &app.filter_text;
     let f_lower = filter.to_lowercase();
 
-    let max_w = inner.width as usize;
+    let max_w = (inner.width as usize).saturating_sub(1); // 1 char right padding
     let spine_pos = 9usize;
     let content_start = 11usize;
     let spine_sep = format!("{}│", " ".repeat(spine_pos));
@@ -832,17 +832,26 @@ fn format_elapsed(ts: i64, _snap: &StoreSnapshot, is_latest: bool) -> String {
     let now = chrono::Utc::now().timestamp();
     let diff = (now - ts).max(0);
     let ko = is_korean_locale();
-    let text = match (is_latest && diff < 120, diff, ko) {
-        (true, 0..=59, true) => format!("{}초", diff),
-        (true, 0..=59, false) => format!("{}s", diff),
-        (true, _, true) => format!("{}분", diff / 60),
-        (true, _, false) => format!("{}m", diff / 60),
-        (false, 0..=59, true) => "방금".to_string(),
-        (false, 0..=59, false) => "now".to_string(),
-        (false, 60..=3599, true) => format!("{}분 전", diff / 60),
-        (false, 60..=3599, false) => format!("{}m ago", diff / 60),
-        (false, _, true) => format!("{}시간 전", diff / 3600),
-        (false, _, false) => format!("{}h ago", diff / 3600),
+    let is_active = is_latest && diff < 120;
+    let text = if is_active && diff < 60 {
+        if ko { format!("{}초", diff) } else { format!("{}s", diff) }
+    } else if is_active {
+        if ko { format!("{}분", diff / 60) } else { format!("{}m", diff / 60) }
+    } else if diff < 60 {
+        if ko { "방금".into() } else { "now".into() }
+    } else if diff < 3600 {
+        if ko { format!("{}분 전", diff / 60) } else { format!("{}m ago", diff / 60) }
+    } else if diff < 86400 {
+        if ko { format!("{}시간 전", diff / 3600) } else { format!("{}h ago", diff / 3600) }
+    } else if diff < 2_592_000 {
+        let days = diff / 86400;
+        if ko { format!("{}일 전", days) } else { format!("{}d ago", days) }
+    } else if diff < 31_536_000 {
+        let months = diff / 2_592_000;
+        if ko { format!("{}달 전", months) } else { format!("{}mo ago", months) }
+    } else {
+        let years = diff / 31_536_000;
+        if ko { format!("{}년 전", years) } else { format!("{}y ago", years) }
     };
     // Use display width for correct CJK alignment
     let w = display_width(&text);
