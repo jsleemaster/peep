@@ -69,6 +69,9 @@ pub async fn run_jsonl_watcher(
         }
     }
 
+    // Initial scan: read all existing JSONL history to populate agent state + skill counts
+    initial_scan(&offsets, &tx).await;
+
     // Build the notify watcher.  The callback runs on a thread pool, so it
     // only sends the modified path through the channel; heavy work happens in
     // the async loop below.
@@ -129,6 +132,27 @@ pub async fn run_jsonl_watcher(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Read all existing JSONL files to populate initial agent state, skill counts, etc.
+/// Reads from the beginning to EOF, sending all events through the channel.
+async fn initial_scan(
+    offsets: &HashMap<PathBuf, u64>,
+    tx: &mpsc::Sender<RawIngestEvent>,
+) {
+    for path in offsets.keys() {
+        let file = match std::fs::File::open(path) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        let reader = BufReader::new(file);
+        for line in reader.lines().map_while(Result::ok) {
+            if let Some(mut event) = parse_jsonl_line(&line) {
+                event.ai_tool = detect_ai_tool(path);
+                let _ = tx.try_send(event);
+            }
+        }
+    }
+}
 
 /// Recursively find all `.jsonl` files under `dir` and record their current
 /// EOF byte offset so we do **not** replay historical events.
