@@ -46,7 +46,7 @@ struct Cli {
     #[arg(long)]
     tick_rate: Option<u64>,
 
-    /// JSONL watch directory (defaults to ~/.claude/projects/)
+    /// Primary JSONL watch directory (Codex/Gemini dirs are auto-detected)
     #[arg(long)]
     watch_dir: Option<PathBuf>,
 

@@ -254,15 +254,60 @@ impl AppStore {
         // ----------------------------------------------------------------
         // Agents
         // ----------------------------------------------------------------
-        type AgentTuple<'a> = (&'a str, &'a str, AgentState, AgentRole, Option<f64>, &'a str);
+        type AgentTuple<'a> = (
+            &'a str,
+            &'a str,
+            AgentState,
+            AgentRole,
+            Option<f64>,
+            &'a str,
+            &'a str,
+            &'a str,
+        );
         let agents_raw: &[AgentTuple] = &[
-            ("main-worker-0001abcd", "main-worker",  AgentState::Active,    AgentRole::Main,     Some(67.0), "/Users/leeo/evar/platform"),
-            ("team-review-0002efgh", "team-review",  AgentState::Waiting,   AgentRole::Team,     Some(22.0), "/Users/leeo/evar/platform"),
-            ("sub-scout-0003ijkl",   "sub-scout",    AgentState::Completed, AgentRole::Subagent, None,       "/Users/leeo/peep"),
-            ("team-builder-0004mnop","team-builder", AgentState::Active,    AgentRole::Team,     Some(45.0), "/Users/leeo/bill-pr"),
+            (
+                "main-worker-0001abcd",
+                "release-captain",
+                AgentState::Active,
+                AgentRole::Main,
+                Some(67.0),
+                "/Users/leeo/evar/platform",
+                "claude",
+                "claude-sonnet-4-5",
+            ),
+            (
+                "team-review-0002efgh",
+                "codex-audit",
+                AgentState::Waiting,
+                AgentRole::Team,
+                Some(22.0),
+                "/Users/leeo/evar/platform",
+                "codex",
+                "gpt-5.4",
+            ),
+            (
+                "sub-scout-0003ijkl",
+                "gemini-scout",
+                AgentState::Completed,
+                AgentRole::Subagent,
+                None,
+                "/Users/leeo/peep",
+                "gemini",
+                "gemini-2.5-pro",
+            ),
+            (
+                "team-builder-0004mnop",
+                "ship-it-bot",
+                AgentState::Active,
+                AgentRole::Team,
+                Some(45.0),
+                "/Users/leeo/bill-pr",
+                "codex",
+                "gpt-5.4-mini",
+            ),
         ];
 
-        for (id, name, state, role, ctx, cwd) in agents_raw {
+        for (id, name, state, role, ctx, cwd, ai_tool, model_name) in agents_raw {
             let mut skill_usage = HashMap::new();
             skill_usage.insert(SkillKind::Read,   12u64);
             skill_usage.insert(SkillKind::Edit,    5);
@@ -287,9 +332,9 @@ impl AppStore {
                     last_event_ts: now - 30,
                     context_percent: *ctx,
                     cost_usd:      Some(0.12),
-                    model_name:    Some("claude-sonnet-4-5".to_string()),
+                    model_name:    Some((*model_name).to_string()),
                     cwd:           Some(cwd.to_string()),
-                    ai_tool:       Some("claude".to_string()),
+                    ai_tool:       Some((*ai_tool).to_string()),
                 },
             );
         }
@@ -329,6 +374,11 @@ impl AppStore {
                 .map(|a| (a.display_name.clone(), a.short_id.clone()))
                 .unwrap_or_else(|| (agent_id[..8].to_string(), agent_id[..8].to_string()));
 
+            let ai_tool = self
+                .agents
+                .get(*agent_id)
+                .and_then(|a| a.ai_tool.clone());
+
             let ev = FeedEvent {
                 id: uuid::Uuid::new_v4().to_string(),
                 ts: now - (feed_entries.len() as i64 - i as i64) * 3,
@@ -343,7 +393,7 @@ impl AppStore {
                 total_tokens: Some(42_000),
                 is_error: false,
                 ingest_source: IngestSource::Http,
-                ai_tool: Some("claude".to_string()),
+                ai_tool,
             };
             self.feed.push_back(ev);
         }

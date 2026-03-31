@@ -64,7 +64,7 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &mut App, snap: &StoreSnapsh
     );
 
     if snap.agents.is_empty() && snap.feed.is_empty() {
-        render_empty_party(f, area, app.port);
+        render_empty_party(f, area, app.port, app.tick);
         return;
     }
 
@@ -128,17 +128,12 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &mut App, snap: &StoreSnapsh
     render_right_panel(f, main[1], app, snap);
 }
 
-fn render_empty_party(f: &mut Frame, area: Rect, _port: u16) {
+fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
     // Fill background
     f.render_widget(
         Paragraph::new("").style(Style::default().bg(card_bg())),
         area,
     );
-
-    let tick = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as usize;
 
     // Animated chicken sprite (alternates idle/peck)
     let chicken_pixels = if (tick / 600).is_multiple_of(2) {
@@ -186,10 +181,10 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16) {
     let sub_y = text_y + 2;
     if sub_y < area.y + area.height {
         let sub = Line::from(Span::styled(
-            "Start any AI coding tool to begin",
+            "Start any AI coding tool or run peep --mock",
             Style::default().fg(t.text_dim),
         ));
-        let sub_w = 40u16;
+        let sub_w = 46u16;
         f.render_widget(
             Paragraph::new(sub).style(Style::default().bg(card_bg())),
             Rect::new(center_x.saturating_sub(sub_w / 2), sub_y, sub_w, 1),

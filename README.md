@@ -1,12 +1,36 @@
 # peep
 
-> Peep into your AI coding agents
+> Watch AI coding agents work from your terminal
 
-Terminal dashboard that monitors AI coding agents in real-time. Watch your agents work with pixel-art characters, conversation timelines, and multi-project support.
+Zero-config terminal dashboard for watching AI coding agents in real time. `peep` reads local session logs from Claude Code, Codex CLI, and Gemini CLI, then turns them into a live party view with pixel-art characters, project tabs, and sub-agent focus mode.
 
 ![peep screenshot](assets/screenshot.png)
 
-## Features
+No API keys. No hosted dashboard. No setup ceremony for the default path.
+
+## Try In 30 Seconds
+
+```bash
+brew tap jsleemaster/tap
+brew install peep
+PEEP_NO_AUTO_UPDATE=1 peep --mock
+```
+
+`peep --mock` is the fastest way to preview the UI. To watch real work, keep `peep` open while Claude Code, Codex, or Gemini are running normally.
+
+Latest release: <https://github.com/jsleemaster/peep/releases/latest>
+
+## Demo
+
+Sub-agent focus mode:
+
+![peep focus mode](assets/screenshot-focus.png)
+
+Empty state and supported tools:
+
+![peep empty state](assets/screenshot-empty.png)
+
+## Why peep
 
 - **Vertical timeline** — Centered spine layout with `│` `●` `◆` `◇` markers
 - **Pixel art characters** — Leader agent is a mother hen, sub-agents start as eggs and grow into chicks
@@ -18,7 +42,7 @@ Terminal dashboard that monitors AI coding agents in real-time. Watch your agent
 - **Dark/Light theme** — Auto-detects or set with `--theme`
 - **Auto-update** — Automatically downloads new versions on startup
 - **Korean IME support** — Keyboard shortcuts work with Korean input mode
-- **Zero config** — Just run `peep`, it auto-discovers AI session logs
+- **Zero config** — Just run `peep`, it auto-discovers local AI session logs
 
 ## Prerequisites
 
@@ -44,6 +68,13 @@ peep works **out of the box** with no setup required — it automatically watche
 | Gemini CLI | `~/.gemini/logs/sessions/` | ✅ Auto-detected |
 | OpenCode | `.opencode/logs/` | 🔜 Coming soon |
 
+## How It Reads Data / Privacy
+
+- `peep` watches local JSONL session files by default.
+- Nothing needs to be sent to a cloud service for the default experience.
+- Optional HTTP hooks exist for lower latency, but they are not required.
+- Demo mode is built in: `peep --mock`
+
 ## Installation
 
 ### Homebrew (recommended)
@@ -57,15 +88,19 @@ brew install peep
 
 ```bash
 # macOS (Apple Silicon)
-curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-aarch64-apple-darwin.tar.gz | tar xz
+curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-macos-arm64.tar.gz | tar xz
 sudo mv peep /usr/local/bin/
 
 # macOS (Intel)
-curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-x86_64-apple-darwin.tar.gz | tar xz
+curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-macos-intel.tar.gz | tar xz
 sudo mv peep /usr/local/bin/
 
 # Linux (x86_64)
-curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-x86_64-unknown-linux-gnu.tar.gz | tar xz
+curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-linux-x86_64.tar.gz | tar xz
+sudo mv peep /usr/local/bin/
+
+# Linux (arm64)
+curl -L https://github.com/jsleemaster/peep/releases/latest/download/peep-linux-arm64.tar.gz | tar xz
 sudo mv peep /usr/local/bin/
 ```
 
@@ -81,6 +116,9 @@ cargo install --git https://github.com/jsleemaster/peep
 # Just run it — auto-discovers AI session logs
 peep
 
+# Safe demo without personal logs
+PEEP_NO_AUTO_UPDATE=1 peep --mock
+
 # Light theme
 peep --theme light
 
@@ -89,9 +127,6 @@ peep --port 4000
 
 # Disable JSONL file watcher (HTTP hooks only)
 peep --no-jsonl
-
-# Demo with mock data
-peep --mock
 
 # Disable auto-update
 PEEP_NO_AUTO_UPDATE=1 peep
@@ -188,6 +223,11 @@ PEEP_NO_AUTO_UPDATE=1 peep
 - **OS**: macOS, Linux (Windows via WSL)
 - **Terminal**: Any terminal with 256-color or truecolor support
 - **AI Tool**: At least one of Claude Code, Codex CLI, or Gemini CLI actively running
+
+## Launch Assets
+
+- Product Hunt launch copy and checklists: [`docs/product-hunt/README.md`](docs/product-hunt/README.md)
+- Asset generator: `./scripts/generate_product_hunt_assets.sh`
 
 ## License
 
