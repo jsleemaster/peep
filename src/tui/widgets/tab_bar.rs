@@ -69,13 +69,16 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         Style::default().fg(Color::Rgb(220, 100, 100)), // soft red for token usage
     ));
 
-    stats.push(sep.clone());
-    stats.push(Span::styled(
-        format!("${:.2}", m.total_cost),
-        Style::default().fg(t.accent_green),
-    ));
+    // Only show cost if non-zero
+    if m.total_cost > 0.001 {
+        stats.push(sep.clone());
+        stats.push(Span::styled(
+            format!("${:.2}", m.total_cost),
+            Style::default().fg(t.accent_green),
+        ));
+    }
 
-    let hint = "q:quit j/k:scroll h/l:focus Enter:agent Esc:back [,]:project";
+    let hint = "q:quit j/k:scroll []:project Enter:agent";
     let left_len: usize = stats.iter().map(|s| s.content.chars().count()).sum();
     let padding = (area.width as usize).saturating_sub(left_len + hint.chars().count() + 2);
     stats.push(Span::raw(" ".repeat(padding)));

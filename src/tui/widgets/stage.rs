@@ -641,6 +641,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
 
     let mut lines: Vec<Line> = Vec::new();
     let last_ts = feed_iter.last().map(|e| e.ts).unwrap_or(0);
+    let mut prev_agent_id: Option<&str> = None;
 
     for event in feed_iter.iter() {
         // Apply filter
@@ -687,10 +688,13 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
             _ => None,
         };
 
-        // Spine separator line (skip before first event)
-        if !lines.is_empty() {
+        // Spine separator: only when agent changes or user prompt
+        let agent_changed = prev_agent_id.is_some_and(|prev| prev != event.agent_id);
+        let is_user_prompt = event.event_type == RuntimeEventType::TurnActive;
+        if !lines.is_empty() && (agent_changed || is_user_prompt) {
             lines.push(Line::from(Span::styled(spine_sep.clone(), Style::default().fg(border()))));
         }
+        prev_agent_id = Some(&event.agent_id);
 
         // Elapsed color: "N초째/N분째" = yellow (active), others = dim
         let elapsed_color = if is_latest && {
