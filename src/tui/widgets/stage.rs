@@ -403,8 +403,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     }
 
     // Adaptive: sprite grid for ≤4 members, compact list for 5+
-    let remaining_h = (li.y + li.height).saturating_sub(y) as usize;
-    let use_compact = party_members.len() > 4 || remaining_h < 16;
+    let use_compact = party_members.len() > 6;
 
     if use_compact {
         // ── Compact list mode: 1 line per agent ──

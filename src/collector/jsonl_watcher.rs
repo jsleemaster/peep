@@ -133,13 +133,28 @@ pub async fn run_jsonl_watcher(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Read all existing JSONL files to populate initial agent state, skill counts, etc.
-/// Reads from the beginning to EOF, sending all events through the channel.
+/// Read recent JSONL files (modified within 24h) to populate initial agent state.
 async fn initial_scan(
     offsets: &HashMap<PathBuf, u64>,
     tx: &mpsc::Sender<RawIngestEvent>,
 ) {
+    let cutoff = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .saturating_sub(86400); // 24 hours ago
+
     for path in offsets.keys() {
+        // Skip files not modified in the last 24 hours
+        let modified = std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).map_err(std::io::Error::other))
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if modified < cutoff {
+            continue;
+        }
+
         let file = match std::fs::File::open(path) {
             Ok(f) => f,
             Err(_) => continue,
