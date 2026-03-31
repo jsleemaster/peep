@@ -142,7 +142,7 @@ async fn initial_scan(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-        .saturating_sub(86400); // 24 hours ago
+        .saturating_sub(604800); // 7 days ago
 
     for path in offsets.keys() {
         // Skip files not modified in the last 24 hours

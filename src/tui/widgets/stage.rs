@@ -358,24 +358,39 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         y += 1;
         let mut skills: Vec<_> = leader.skills_invoked.iter().collect();
         skills.sort_by(|a, b| b.1.cmp(a.1)); // most used first
-        let skills_text: String = skills.iter()
-            .take(3) // top 3
-            .map(|(name, count)| {
-                // shorten "superpowers:brainstorming" → "brainstorming"
-                let short = name.rsplit(':').next().unwrap_or(name);
-                format!("{} ×{}", short, count)
-            })
-            .collect::<Vec<_>>()
-            .join("  ");
-        let skills_line = Line::from(vec![
-            Span::styled(" ⚡ ", Style::default().fg(theme().accent_yellow)),
-            Span::styled(skills_text, Style::default().fg(dim())),
-        ]);
-        f.render_widget(
-            Paragraph::new(skills_line).style(Style::default().bg(card_bg())),
-            Rect::new(li.x, y, li.width, 1),
-        );
-        y += 1;
+
+        // Build skill items that fit on available lines
+        let max_w = li.width as usize;
+        let mut current_line = String::from(" ⚡");
+        for (name, count) in skills.iter().take(8) {
+            let short = name.rsplit(':').next().unwrap_or(name);
+            let item = format!(" {} ×{}", short, count);
+            if display_width(&current_line) + display_width(&item) + 1 > max_w {
+                // Flush current line
+                if y < li.y + li.height {
+                    f.render_widget(
+                        Paragraph::new(Line::from(vec![
+                            Span::styled(current_line.clone(), Style::default().fg(dim())),
+                        ])).style(Style::default().bg(card_bg())),
+                        Rect::new(li.x, y, li.width, 1),
+                    );
+                    y += 1;
+                }
+                current_line = format!("   {}", item.trim());
+            } else {
+                current_line.push_str(&item);
+            }
+        }
+        // Flush last line
+        if !current_line.is_empty() && y < li.y + li.height {
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(current_line, Style::default().fg(dim())),
+                ])).style(Style::default().bg(card_bg())),
+                Rect::new(li.x, y, li.width, 1),
+            );
+            y += 1;
+        }
     }
 
     // Party separator
