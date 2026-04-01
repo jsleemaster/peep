@@ -69,8 +69,14 @@ pub async fn run_jsonl_watcher(
         }
     }
 
-    // Initial scan: read all existing JSONL history to populate agent state + skill counts
-    initial_scan(&offsets, &tx).await;
+    // Initial scan: spawn as background task so main loop can consume events concurrently
+    {
+        let scan_tx = tx.clone();
+        let scan_paths: Vec<PathBuf> = offsets.keys().cloned().collect();
+        tokio::spawn(async move {
+            initial_scan_bg(&scan_paths, &scan_tx).await;
+        });
+    }
 
     // Build the notify watcher.  The callback runs on a thread pool, so it
     // only sends the modified path through the channel; heavy work happens in
@@ -133,9 +139,10 @@ pub async fn run_jsonl_watcher(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Read recent JSONL files (modified within 24h) to populate initial agent state.
-async fn initial_scan(
-    offsets: &HashMap<PathBuf, u64>,
+/// Read recent JSONL files (modified within 7 days) to populate initial agent state.
+/// Runs as background task — uses `send().await` to apply backpressure instead of dropping.
+async fn initial_scan_bg(
+    paths: &[PathBuf],
     tx: &mpsc::Sender<RawIngestEvent>,
 ) {
     let cutoff = std::time::SystemTime::now()
@@ -144,8 +151,7 @@ async fn initial_scan(
         .as_secs()
         .saturating_sub(604800); // 7 days ago
 
-    for path in offsets.keys() {
-        // Skip files not modified in the last 24 hours
+    for path in paths {
         let modified = std::fs::metadata(path)
             .and_then(|m| m.modified())
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).map_err(std::io::Error::other))
@@ -163,9 +169,14 @@ async fn initial_scan(
         for line in reader.lines().map_while(Result::ok) {
             if let Some(mut event) = parse_jsonl_line(&line) {
                 event.ai_tool = detect_ai_tool(path);
-                let _ = tx.try_send(event);
+                // Use send().await for backpressure (don't drop events)
+                if tx.send(event).await.is_err() {
+                    return; // channel closed, stop
+                }
             }
         }
+        // Yield occasionally so live events can be processed
+        tokio::task::yield_now().await;
     }
 }
 
