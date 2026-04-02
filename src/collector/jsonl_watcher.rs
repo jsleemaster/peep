@@ -139,8 +139,8 @@ pub async fn run_jsonl_watcher(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Read recent JSONL files (modified within 7 days) to populate initial agent state.
-/// Runs as background task — uses `send().await` to apply backpressure instead of dropping.
+/// Read recent JSONL files (modified within 7 days) to populate initial state.
+/// Only parses lines containing key markers (Skill, agent metadata) for speed.
 async fn initial_scan_bg(
     paths: &[PathBuf],
     tx: &mpsc::Sender<RawIngestEvent>,
@@ -169,13 +169,11 @@ async fn initial_scan_bg(
         for line in reader.lines().map_while(Result::ok) {
             if let Some(mut event) = parse_jsonl_line(&line) {
                 event.ai_tool = detect_ai_tool(path);
-                // Use send().await for backpressure (don't drop events)
                 if tx.send(event).await.is_err() {
-                    return; // channel closed, stop
+                    return;
                 }
             }
         }
-        // Yield occasionally so live events can be processed
         tokio::task::yield_now().await;
     }
 }

@@ -348,20 +348,24 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         y += 1;
     }
 
-    // Skills invoked by leader
-    if !leader.skills_invoked.is_empty() && y < li.y + li.height {
+    // Skills: aggregate across ALL agents in project (not just leader)
+    let mut all_skills: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
+    for agent in &proj_agents {
+        for (name, count) in &agent.skills_invoked {
+            *all_skills.entry(name.as_str()).or_insert(0) += count;
+        }
+    }
+    if !all_skills.is_empty() && y < li.y + li.height {
         y += 1;
-        let mut skills: Vec<_> = leader.skills_invoked.iter().collect();
-        skills.sort_by(|a, b| b.1.cmp(a.1)); // most used first
+        let mut skills: Vec<_> = all_skills.iter().collect();
+        skills.sort_by(|a, b| b.1.cmp(a.1));
 
-        // Build skill items that fit on available lines
         let max_w = li.width as usize;
-        let mut current_line = String::from(" ⚡");
-        for (name, count) in skills.iter().take(8) {
+        let mut current_line = String::from(" \u{26a1}");
+        for (name, count) in skills.iter().take(10) {
             let short = name.rsplit(':').next().unwrap_or(name);
             let item = format!(" {} ×{}", short, count);
             if display_width(&current_line) + display_width(&item) + 1 > max_w {
-                // Flush current line
                 if y < li.y + li.height {
                     f.render_widget(
                         Paragraph::new(Line::from(vec![
@@ -376,7 +380,6 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                 current_line.push_str(&item);
             }
         }
-        // Flush last line
         if !current_line.is_empty() && y < li.y + li.height {
             f.render_widget(
                 Paragraph::new(Line::from(vec![
