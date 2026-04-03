@@ -371,32 +371,55 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         y += 1;
         let mut skills: Vec<_> = all_skills.iter().collect();
         skills.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+        let max_count = skills.first().map(|(_, c)| **c).unwrap_or(1).max(1);
 
         let max_w = li.width as usize;
-        let mut current_line = String::from(" \u{26a1}");
-        for (name, count) in skills.iter().take(10) {
+        let mut spans: Vec<Span> = vec![
+            Span::styled(" \u{26a1} ", Style::default().fg(theme().accent_yellow)),
+        ];
+        let mut line_w = 3usize; // "⚡ "
+
+        for (name, count) in &skills {
             let short = name.rsplit(':').next().unwrap_or(name);
-            let item = format!(" {} ×{}", short, count);
-            if display_width(&current_line) + display_width(&item) + 1 > max_w {
+            let item_name = short.to_string();
+            let item_count = format!(" ×{} ", count);
+            let item_w = display_width(&item_name) + display_width(&item_count);
+
+            // Wrap to next line if needed
+            if line_w + item_w > max_w && line_w > 3 {
                 if y < li.y + li.height {
                     f.render_widget(
-                        Paragraph::new(Line::from(vec![
-                            Span::styled(current_line.clone(), Style::default().fg(dim())),
-                        ])).style(Style::default().bg(card_bg())),
+                        Paragraph::new(Line::from(spans.clone())).style(Style::default().bg(card_bg())),
                         Rect::new(li.x, y, li.width, 1),
                     );
                     y += 1;
                 }
-                current_line = format!("   {}", item.trim());
-            } else {
-                current_line.push_str(&item);
+                spans.clear();
+                spans.push(Span::styled("   ", Style::default().bg(card_bg())));
+                line_w = 3;
             }
+
+            // Color by usage intensity: low=dim, mid=yellow, high=green, very high=brand
+            let ratio = **count as f64 / max_count as f64;
+            let name_color = if ratio > 0.75 {
+                theme().brand           // gold — most used
+            } else if ratio > 0.4 {
+                theme().accent_green    // green — frequently used
+            } else if ratio > 0.15 {
+                theme().accent_yellow   // yellow — moderate
+            } else {
+                dim()                   // dim — rarely used
+            };
+            let count_color = dim();
+
+            spans.push(Span::styled(item_name, Style::default().fg(name_color)));
+            spans.push(Span::styled(item_count, Style::default().fg(count_color)));
+            line_w += item_w;
         }
-        if !current_line.is_empty() && y < li.y + li.height {
+        // Flush last line
+        if !spans.is_empty() && y < li.y + li.height {
             f.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(current_line, Style::default().fg(dim())),
-                ])).style(Style::default().bg(card_bg())),
+                Paragraph::new(Line::from(spans)).style(Style::default().bg(card_bg())),
                 Rect::new(li.x, y, li.width, 1),
             );
             y += 1;
