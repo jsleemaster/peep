@@ -129,7 +129,13 @@ impl AppStore {
             if let Some(ref detail) = raw.detail {
                 let skill_name = detail.split_whitespace().next().unwrap_or(detail);
                 *agent.skills_invoked.entry(skill_name.to_string()).or_insert(0) += 1;
+                tracing::debug!("Skill tracked: {} for agent {}", skill_name, agent_id);
             }
+        }
+
+        // Also track Skill from ToolSearch → Skill chain (tool_result with skill reference)
+        if raw.tool_name.as_deref() == Some("ToolSearch") {
+            // ToolSearch is often followed by Skill, but ToolSearch itself isn't a skill
         }
 
         let display_name = agent.display_name.clone();
