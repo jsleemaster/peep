@@ -136,7 +136,9 @@ pub async fn run_jsonl_watcher(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Read recent JSONL files (modified within 7 days) to populate initial state.
+/// Read recent JSONL files to populate initial state.
+/// For large files (>1MB), only reads the last 1MB to avoid blocking.
+/// Specifically scans for Skill tool_use events for skill counting.
 async fn initial_scan_bg(
     paths: &[PathBuf],
     tx: &mpsc::Sender<RawIngestEvent>,
@@ -161,7 +163,19 @@ async fn initial_scan_bg(
             Ok(f) => f,
             Err(_) => continue,
         };
-        let reader = BufReader::new(file);
+
+        let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+        let mut reader = BufReader::new(file);
+
+        // For large files, seek to last 1MB to avoid parsing 40MB+ files
+        if file_len > 1_048_576 {
+            let seek_pos = file_len.saturating_sub(1_048_576);
+            let _ = reader.seek(SeekFrom::Start(seek_pos));
+            // Skip partial first line after seek
+            let mut discard = String::new();
+            let _ = reader.read_line(&mut discard);
+        }
+
         for line in reader.lines().map_while(Result::ok) {
             if let Some(mut event) = parse_jsonl_line(&line) {
                 event.ai_tool = detect_ai_tool(path);
