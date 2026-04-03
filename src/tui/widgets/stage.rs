@@ -367,65 +367,75 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             *all_skills.entry(name.as_str()).or_insert(0) += count;
         }
     }
-    if !all_skills.is_empty() && y < li.y + li.height {
-        y += 1;
+    if !all_skills.is_empty() && y + 2 < li.y + li.height {
         let mut skills: Vec<_> = all_skills.iter().collect();
         skills.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
         let max_count = skills.first().map(|(_, c)| **c).unwrap_or(1).max(1);
+        let panel_w = li.width as usize;
 
-        let max_w = li.width as usize;
-        let mut spans: Vec<Span> = vec![
-            Span::styled(" \u{26a1} ", Style::default().fg(theme().accent_yellow)),
-        ];
-        let mut line_w = 3usize; // "⚡ "
+        // Header
+        y += 1;
+        let total: u64 = skills.iter().map(|(_, c)| **c).sum();
+        let header = format!(
+            " \u{26a1} skills ({}) \u{2500}{}",
+            total,
+            "\u{2500}".repeat(panel_w.saturating_sub(16))
+        );
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(header, Style::default().fg(dim()))))
+                .style(Style::default().bg(card_bg())),
+            Rect::new(li.x, y, li.width, 1),
+        );
+        y += 1;
+
+        // Each skill: name + bar + count
+        let name_col = 14usize; // fixed name column
+        let count_col = 4usize; // " 16"
+        let bar_max = panel_w.saturating_sub(name_col + count_col + 4); // remaining for bar
 
         for (name, count) in &skills {
-            let short = name.rsplit(':').next().unwrap_or(name);
-            let item_name = short.to_string();
-            let item_count = format!(" ×{} ", count);
-            let item_w = display_width(&item_name) + display_width(&item_count);
-
-            // Wrap to next line if needed
-            if line_w + item_w > max_w && line_w > 3 {
-                if y < li.y + li.height {
-                    f.render_widget(
-                        Paragraph::new(Line::from(spans.clone())).style(Style::default().bg(card_bg())),
-                        Rect::new(li.x, y, li.width, 1),
-                    );
-                    y += 1;
-                }
-                spans.clear();
-                spans.push(Span::styled("   ", Style::default().bg(card_bg())));
-                line_w = 3;
+            if y >= li.y + li.height {
+                break;
             }
 
-            // Color gradient by usage intensity (7 levels)
-            let ratio = **count as f64 / max_count as f64;
-            let name_color = if ratio > 0.9 {
-                Color::Rgb(255, 220, 50)   // bright gold — #1 most used
-            } else if ratio > 0.7 {
-                Color::Rgb(255, 180, 60)   // orange-gold
-            } else if ratio > 0.5 {
-                Color::Rgb(100, 220, 140)  // green
-            } else if ratio > 0.35 {
-                Color::Rgb(100, 200, 255)  // sky blue
-            } else if ratio > 0.2 {
-                Color::Rgb(180, 170, 220)  // lavender
-            } else if ratio > 0.1 {
-                Color::Rgb(160, 160, 180)  // muted
-            } else {
-                dim()                      // dim — rarely used
-            };
-            let count_color = dim();
+            let short = name.rsplit(':').next().unwrap_or(name);
+            let truncated = truncate_to_width(short, name_col.saturating_sub(2));
+            let padded_name = format!(" {:<width$}", truncated, width = name_col - 1);
 
-            spans.push(Span::styled(item_name, Style::default().fg(name_color)));
-            spans.push(Span::styled(item_count, Style::default().fg(count_color)));
-            line_w += item_w;
-        }
-        // Flush last line
-        if !spans.is_empty() && y < li.y + li.height {
+            // Bar proportional to max
+            let ratio = **count as f64 / max_count as f64;
+            let filled = (ratio * bar_max as f64).round() as usize;
+            let empty = bar_max.saturating_sub(filled);
+            let bar_filled = "\u{2588}".repeat(filled);
+            let bar_empty = "\u{2591}".repeat(empty);
+
+            // Color gradient (7 levels)
+            let bar_color = if ratio > 0.9 {
+                Color::Rgb(255, 220, 50)
+            } else if ratio > 0.7 {
+                Color::Rgb(255, 180, 60)
+            } else if ratio > 0.5 {
+                Color::Rgb(100, 220, 140)
+            } else if ratio > 0.35 {
+                Color::Rgb(100, 200, 255)
+            } else if ratio > 0.2 {
+                Color::Rgb(180, 170, 220)
+            } else if ratio > 0.1 {
+                Color::Rgb(160, 160, 180)
+            } else {
+                dim()
+            };
+
+            let count_str = format!("{:>3}", count);
+
+            let line = Line::from(vec![
+                Span::styled(padded_name, Style::default().fg(bar_color)),
+                Span::styled(bar_filled, Style::default().fg(bar_color)),
+                Span::styled(bar_empty, Style::default().fg(theme().hp_empty)),
+                Span::styled(format!(" {}", count_str), Style::default().fg(dim())),
+            ]);
             f.render_widget(
-                Paragraph::new(Line::from(spans)).style(Style::default().bg(card_bg())),
+                Paragraph::new(line).style(Style::default().bg(card_bg())),
                 Rect::new(li.x, y, li.width, 1),
             );
             y += 1;
