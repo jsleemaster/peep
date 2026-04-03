@@ -18,6 +18,7 @@ pub struct StoreSnapshot {
     pub sessions: Vec<Session>,
     pub sparkline: Vec<u64>,
     pub metrics: crate::store::metrics::DerivedMetrics,
+    pub available_skills: Vec<String>,
 }
 
 impl StoreSnapshot {
@@ -29,12 +30,14 @@ impl StoreSnapshot {
         let sessions = s.sessions.clone();
         let sparkline = s.velocity_sparkline_data(15, now);
         let metrics = s.derived_metrics(now);
+        let available_skills = s.available_skills.clone();
         StoreSnapshot {
             agents,
             feed,
             sessions,
             sparkline,
             metrics,
+            available_skills,
         }
     }
 }

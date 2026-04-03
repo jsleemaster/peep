@@ -15,6 +15,7 @@ pub struct AppStore {
     pub feed: VecDeque<FeedEvent>,
     pub sessions: Vec<Session>,
     pub activity_timestamps: VecDeque<i64>,
+    pub available_skills: Vec<String>, // all known skill names from disk
 }
 
 pub type SharedStore = Arc<RwLock<AppStore>>;
@@ -26,6 +27,7 @@ impl AppStore {
             feed: VecDeque::new(),
             sessions: Vec::new(),
             activity_timestamps: VecDeque::new(),
+            available_skills: discover_available_skills(),
         }
     }
 
@@ -446,4 +448,58 @@ impl AppStore {
             format!("{}", tokens)
         }
     }
+}
+
+/// Discover all available skills from ~/.claude/ directories.
+fn discover_available_skills() -> Vec<String> {
+    let mut skills = std::collections::HashSet::new();
+
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return Vec::new(),
+    };
+    let claude_dir = home.join(".claude");
+
+    // 1. ~/.claude/commands/*.md
+    if let Ok(entries) = std::fs::read_dir(claude_dir.join("commands")) {
+        for entry in entries.flatten() {
+            if let Some(name) = entry.path().file_stem().and_then(|s| s.to_str()) {
+                skills.insert(name.to_string());
+            }
+        }
+    }
+
+    // 2. ~/.claude/skills/*/SKILL.md → folder name
+    if let Ok(entries) = std::fs::read_dir(claude_dir.join("skills")) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                if let Some(name) = entry.path().file_name().and_then(|s| s.to_str()) {
+                    skills.insert(name.to_string());
+                }
+            }
+        }
+    }
+
+    // 3. ~/.claude/plugins/cache/*/commands/*.md
+    let plugins_dir = claude_dir.join("plugins").join("cache");
+    if plugins_dir.exists() {
+        let walker = walkdir::WalkDir::new(&plugins_dir)
+            .max_depth(5)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_type().is_file()
+                    && e.path().extension().map(|x| x == "md").unwrap_or(false)
+                    && e.path().to_string_lossy().contains("/commands/")
+            });
+        for entry in walker {
+            if let Some(name) = entry.path().file_stem().and_then(|s| s.to_str()) {
+                skills.insert(name.to_string());
+            }
+        }
+    }
+
+    let mut result: Vec<String> = skills.into_iter().collect();
+    result.sort();
+    result
 }

@@ -440,6 +440,44 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             );
             y += 1;
         }
+
+        // Unused skills — from available_skills not in used set
+        let used_set: std::collections::HashSet<&str> = all_skills.keys().copied().collect();
+        let mut unused: Vec<&str> = snap.available_skills.iter()
+            .map(|s| s.as_str())
+            .filter(|s| {
+                let short = s.rsplit(':').next().unwrap_or(s);
+                !used_set.contains(short) && !used_set.contains(*s)
+            })
+            .collect();
+        unused.sort();
+        unused.dedup();
+
+        if !unused.is_empty() && y < li.y + li.height {
+            // Render unused as dim comma-separated list
+            let unused_text: String = unused.iter()
+                .map(|s| s.rsplit(':').next().unwrap_or(s))
+                .collect::<Vec<_>>()
+                .join(" · ");
+
+            let max_w = li.width as usize;
+            let mut remaining = unused_text.as_str();
+            while !remaining.is_empty() && y < li.y + li.height {
+                let chunk = truncate_to_width(remaining, max_w.saturating_sub(2));
+                let chunk_len = chunk.chars().count();
+                f.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        format!(" {}", chunk),
+                        Style::default().fg(Color::Rgb(60, 60, 75)),
+                    ))).style(Style::default().bg(card_bg())),
+                    Rect::new(li.x, y, li.width, 1),
+                );
+                y += 1;
+                // Advance past the chunk
+                let skip: String = remaining.chars().take(chunk_len).collect();
+                remaining = remaining.strip_prefix(&skip).unwrap_or("").trim_start_matches(" · ");
+            }
+        }
     }
 
     // Party separator
