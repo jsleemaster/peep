@@ -396,9 +396,10 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     }
 
     // Party separator
+    // Party: only sub-agents, not other main sessions
     let party_members: Vec<_> = proj_agents
         .iter()
-        .filter(|a| a.agent_id != leader.agent_id)
+        .filter(|a| a.agent_id != leader.agent_id && a.role == AgentRole::Subagent)
         .copied()
         .collect();
 

@@ -165,22 +165,39 @@ async fn initial_scan_bg(
         };
 
         let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
-        let mut reader = BufReader::new(file);
+        let reader = BufReader::new(file);
 
-        // For large files, seek to last 1MB to avoid parsing 40MB+ files
         if file_len > 1_048_576 {
-            let seek_pos = file_len.saturating_sub(1_048_576);
-            let _ = reader.seek(SeekFrom::Start(seek_pos));
-            // Skip partial first line after seek
-            let mut discard = String::new();
-            let _ = reader.read_line(&mut discard);
-        }
-
-        for line in reader.lines().map_while(Result::ok) {
-            if let Some(mut event) = parse_jsonl_line(&line) {
-                event.ai_tool = detect_ai_tool(path);
-                if tx.send(event).await.is_err() {
-                    return;
+            // Large file: two-pass approach
+            // Pass 1: stream entire file, only JSON-parse Skill lines
+            for line in reader.lines().map_while(Result::ok) {
+                if line.contains("\"Skill\"") && line.contains("\"tool_use\"") {
+                    if let Some(mut event) = parse_jsonl_line(&line) {
+                        event.ai_tool = detect_ai_tool(path);
+                        if tx.send(event).await.is_err() { return; }
+                    }
+                }
+            }
+            tokio::task::yield_now().await;
+            // Pass 2: re-open file, read last 512KB for recent agent state
+            if let Ok(file2) = std::fs::File::open(path) {
+                let mut reader2 = BufReader::new(file2);
+                let seek_pos = file_len.saturating_sub(524_288);
+                let _ = reader2.seek(SeekFrom::Start(seek_pos));
+                let mut discard = String::new();
+                let _ = reader2.read_line(&mut discard);
+                for line in reader2.lines().map_while(Result::ok) {
+                    if let Some(mut event) = parse_jsonl_line(&line) {
+                        event.ai_tool = detect_ai_tool(path);
+                        if tx.send(event).await.is_err() { return; }
+                    }
+                }
+            }
+        } else {
+            for line in reader.lines().map_while(Result::ok) {
+                if let Some(mut event) = parse_jsonl_line(&line) {
+                    event.ai_tool = detect_ai_tool(path);
+                    if tx.send(event).await.is_err() { return; }
                 }
             }
         }

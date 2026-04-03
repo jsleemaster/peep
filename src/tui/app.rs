@@ -240,26 +240,37 @@ impl App {
         }
     }
 
-    /// Update current_project based on available projects from agents
+    /// Update current_project based on available projects from agents.
+    /// Preserves selection by name when sort order changes.
     pub fn update_projects(&mut self, projects: &[String]) {
         if projects.is_empty() {
             self.current_project = None;
             self.project_index = 0;
             return;
         }
-        // Wrap index if out of bounds
-        if self.project_index >= projects.len() {
-            self.project_index %= projects.len();
+
+        // If we have a current selection, find it in the new list
+        if let Some(ref current) = self.current_project {
+            if let Some(pos) = projects.iter().position(|p| p == current) {
+                self.project_index = pos;
+                return; // selection still valid
+            }
         }
-        // Resolve project from index
+
+        // No previous selection or it vanished — use index
+        if self.project_index >= projects.len() {
+            self.project_index = 0;
+        }
         self.current_project = Some(projects[self.project_index].clone());
     }
 
     fn next_project(&mut self) {
         self.project_index = self.project_index.wrapping_add(1);
+        self.current_project = None; // force re-resolve from new index
     }
 
     fn prev_project(&mut self) {
+        self.current_project = None; // force re-resolve from new index
         if self.project_index == 0 {
             self.project_index = usize::MAX; // will wrap in update_projects
         } else {
