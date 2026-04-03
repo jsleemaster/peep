@@ -95,6 +95,7 @@ impl AppStore {
                 model_name: None,
                 cwd: raw.cwd.clone(),
                 ai_tool: raw.ai_tool.clone(),
+                parent_session_id: raw.session_runtime_id.clone(),
             }
         });
 
@@ -341,6 +342,7 @@ impl AppStore {
                     model_name:    Some((*model_name).to_string()),
                     cwd:           Some(cwd.to_string()),
                     ai_tool:       Some((*ai_tool).to_string()),
+                    parent_session_id: None,
                 },
             );
         }

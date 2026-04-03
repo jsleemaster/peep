@@ -87,8 +87,16 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &mut App, snap: &StoreSnapsh
         }
     }
 
-    // Project tabs + main content
-    let projects = get_projects(snap);
+    // Project tabs + main content (focused project first)
+    let mut projects = get_projects(snap);
+    if let Some(ref current) = app.current_project {
+        if let Some(pos) = projects.iter().position(|p| p == current) {
+            if pos > 0 {
+                let focused = projects.remove(pos);
+                projects.insert(0, focused);
+            }
+        }
+    }
     let has_projects = projects.len() > 1;
 
     let chunks = if has_projects {
@@ -362,7 +370,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     if !all_skills.is_empty() && y < li.y + li.height {
         y += 1;
         let mut skills: Vec<_> = all_skills.iter().collect();
-        skills.sort_by(|a, b| b.1.cmp(a.1));
+        skills.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
 
         let max_w = li.width as usize;
         let mut current_line = String::from(" \u{26a1}");
@@ -396,10 +404,15 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     }
 
     // Party separator
-    // Party: only sub-agents, not other main sessions
+    // Party: only sub-agents spawned by the current leader session
+    let leader_id = &leader.agent_id;
     let party_members: Vec<_> = proj_agents
         .iter()
-        .filter(|a| a.agent_id != leader.agent_id && a.role == AgentRole::Subagent)
+        .filter(|a| {
+            a.agent_id != *leader_id
+                && (a.role == AgentRole::Subagent
+                    || a.parent_session_id.as_deref() == Some(leader_id))
+        })
         .copied()
         .collect();
 
