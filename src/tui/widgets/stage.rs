@@ -22,15 +22,19 @@ fn border() -> Color { theme().border }
 
 /// Get unique project names from agents
 pub fn get_projects(snap: &StoreSnapshot) -> Vec<String> {
-    let mut projects: Vec<String> = snap
-        .agents
-        .iter()
-        .filter_map(|a| a.cwd.clone())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    projects.sort();
-    projects
+    // Group by cwd, track most recent event timestamp per project
+    let mut project_ts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for agent in &snap.agents {
+        if let Some(ref cwd) = agent.cwd {
+            let entry = project_ts.entry(cwd.clone()).or_insert(0);
+            if agent.last_event_ts > *entry {
+                *entry = agent.last_event_ts;
+            }
+        }
+    }
+    let mut projects: Vec<(String, i64)> = project_ts.into_iter().collect();
+    projects.sort_by(|a, b| b.1.cmp(&a.1)); // most recent first
+    projects.into_iter().map(|(cwd, _)| cwd).collect()
 }
 
 /// Shorten cwd to project name (last path component)
