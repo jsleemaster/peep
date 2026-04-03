@@ -399,16 +399,22 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                 line_w = 3;
             }
 
-            // Color by usage intensity: low=dim, mid=yellow, high=green, very high=brand
+            // Color gradient by usage intensity (7 levels)
             let ratio = **count as f64 / max_count as f64;
-            let name_color = if ratio > 0.75 {
-                theme().brand           // gold — most used
-            } else if ratio > 0.4 {
-                theme().accent_green    // green — frequently used
-            } else if ratio > 0.15 {
-                theme().accent_yellow   // yellow — moderate
+            let name_color = if ratio > 0.9 {
+                Color::Rgb(255, 220, 50)   // bright gold — #1 most used
+            } else if ratio > 0.7 {
+                Color::Rgb(255, 180, 60)   // orange-gold
+            } else if ratio > 0.5 {
+                Color::Rgb(100, 220, 140)  // green
+            } else if ratio > 0.35 {
+                Color::Rgb(100, 200, 255)  // sky blue
+            } else if ratio > 0.2 {
+                Color::Rgb(180, 170, 220)  // lavender
+            } else if ratio > 0.1 {
+                Color::Rgb(160, 160, 180)  // muted
             } else {
-                dim()                   // dim — rarely used
+                dim()                      // dim — rarely used
             };
             let count_color = dim();
 
