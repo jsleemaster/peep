@@ -22,34 +22,63 @@ fn border() -> Color { theme().border }
 
 /// Get unique project names from agents
 pub fn get_projects(snap: &StoreSnapshot) -> Vec<String> {
-    // Group by cwd, track most recent event timestamp per project
-    let mut project_ts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    // Group by normalized project name, track most recent timestamp
+    // Multiple cwds (worktrees, subdirs) map to the same project name
+    let mut project_ts: std::collections::HashMap<String, (i64, String)> = std::collections::HashMap::new();
     for agent in &snap.agents {
         if let Some(ref cwd) = agent.cwd {
-            let entry = project_ts.entry(cwd.clone()).or_insert(0);
-            if agent.last_event_ts > *entry {
-                *entry = agent.last_event_ts;
+            let name = normalize_project_name(cwd);
+            let entry = project_ts.entry(name).or_insert((0, cwd.clone()));
+            if agent.last_event_ts > entry.0 {
+                *entry = (agent.last_event_ts, cwd.clone());
             }
         }
     }
-    let mut projects: Vec<(String, i64)> = project_ts.into_iter().collect();
-    projects.sort_by(|a, b| b.1.cmp(&a.1)); // most recent first
-    projects.into_iter().map(|(cwd, _)| cwd).collect()
+    let mut projects: Vec<(String, i64)> = project_ts
+        .into_iter()
+        .map(|(name, (ts, _))| (name, ts))
+        .collect();
+    projects.sort_by(|a, b| b.1.cmp(&a.1));
+    projects.into_iter().map(|(name, _)| name).collect()
 }
 
-/// Shorten cwd to project name (last path component)
+/// Normalize cwd to a canonical project name.
+/// Strips worktree paths, subdirs like src/shared/assets, etc.
+fn normalize_project_name(cwd: &str) -> String {
+    // Known project directory names to match
+    let parts: Vec<&str> = cwd.split('/').collect();
+    // Look for known service/app directories (skip worktree branch names)
+    // Pattern: .../platform/services/<name> or .../platform/app/<name> or last component
+    for (i, part) in parts.iter().enumerate() {
+        if (*part == "services" || *part == "app") && i + 1 < parts.len() {
+            return parts[i + 1].to_string();
+        }
+    }
+    // Fallback: last non-empty path component that isn't a common subdir
+    let skip = ["src", "shared", "assets", "images", "ui", "components", ".claude", "mcp"];
+    for part in parts.iter().rev() {
+        if !part.is_empty() && !skip.contains(part) {
+            return part.to_string();
+        }
+    }
+    cwd.rsplit('/').next().unwrap_or(cwd).to_string()
+}
+
+/// Shorten cwd to project name
 fn short_project_name(cwd: &str) -> &str {
     cwd.rsplit('/').next().unwrap_or(cwd)
 }
 
-/// Filter snapshot to only include agents/events for the current project
+/// Filter snapshot to only include agents/events for the current project (by normalized name)
 fn filter_snap_by_project<'a>(
     snap: &'a StoreSnapshot,
     project: &Option<String>,
 ) -> (Vec<&'a crate::protocol::types::Agent>, Vec<&'a FeedEvent>) {
     match project {
-        Some(cwd) => {
-            let agents: Vec<_> = snap.agents.iter().filter(|a| a.cwd.as_deref() == Some(cwd)).collect();
+        Some(proj_name) => {
+            let agents: Vec<_> = snap.agents.iter()
+                .filter(|a| a.cwd.as_deref().map(normalize_project_name).as_deref() == Some(proj_name.as_str()))
+                .collect();
             let agent_ids: std::collections::HashSet<_> = agents.iter().map(|a| &a.agent_id).collect();
             let feed: Vec<_> = snap.feed.iter().filter(|e| agent_ids.contains(&e.agent_id)).collect();
             (agents, feed)
