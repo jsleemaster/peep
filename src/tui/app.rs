@@ -18,6 +18,7 @@ pub struct App {
 
     // Scroll / selection state
     pub sidebar_selected: usize,
+    pub sidebar_count: usize,
     pub feed_scroll_offset: usize,
 
     // Auto-scroll: true when user hasn't scrolled up
@@ -51,6 +52,7 @@ impl App {
             show_filter: false,
             filter_text: String::new(),
             sidebar_selected: 0,
+            sidebar_count: 0,
             feed_scroll_offset: 0,
             feed_auto_scroll: true,
             agent_count: 0,
@@ -66,8 +68,9 @@ impl App {
     }
 
     /// Called each tick to update cached counts from the store snapshot.
-    pub fn update_counts(&mut self, agent_count: usize, feed_count: usize, session_count: usize) {
-        self.agent_count = agent_count;
+    pub fn update_counts(&mut self, sidebar_count: usize, feed_count: usize, session_count: usize) {
+        self.sidebar_count = sidebar_count;
+        self.agent_count = sidebar_count;
         self.feed_count = feed_count;
         self.session_count = session_count;
 
@@ -187,7 +190,7 @@ impl App {
     fn scroll_down(&mut self) {
         match self.focus {
             FocusPane::Sidebar => {
-                let max = self.agent_count.saturating_sub(1);
+                let max = self.sidebar_count.saturating_sub(1);
                 if self.sidebar_selected < max {
                     self.sidebar_selected += 1;
                 }
@@ -231,7 +234,7 @@ impl App {
     fn scroll_to_bottom(&mut self) {
         match self.focus {
             FocusPane::Sidebar => {
-                self.sidebar_selected = self.agent_count.saturating_sub(1);
+                self.sidebar_selected = self.sidebar_count.saturating_sub(1);
             }
             FocusPane::MainPanel => {
                 self.feed_scroll_offset = self.feed_count.saturating_sub(1);

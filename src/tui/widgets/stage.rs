@@ -89,6 +89,36 @@ fn filter_snap_by_project<'a>(
     }
 }
 
+fn sidebar_agents<'a>(
+    proj_agents: &[&'a crate::protocol::types::Agent],
+) -> Option<(&'a crate::protocol::types::Agent, Vec<&'a crate::protocol::types::Agent>)> {
+    let leader = proj_agents
+        .iter()
+        .find(|a| a.role == AgentRole::Main)
+        .or_else(|| proj_agents.first())
+        .copied()?;
+
+    let leader_id = &leader.agent_id;
+    let party_members = proj_agents
+        .iter()
+        .filter(|a| {
+            a.agent_id != *leader_id
+                && (a.role == AgentRole::Subagent
+                    || a.parent_session_id.as_deref() == Some(leader_id))
+        })
+        .copied()
+        .collect();
+
+    Some((leader, party_members))
+}
+
+pub fn sidebar_item_count(snap: &StoreSnapshot, project: &Option<String>) -> usize {
+    let (proj_agents, _) = filter_snap_by_project(snap, project);
+    sidebar_agents(&proj_agents)
+        .map(|(_, party_members)| 1 + party_members.len())
+        .unwrap_or(0)
+}
+
 pub fn render_stage(f: &mut Frame, area: Rect, app: &mut App, snap: &StoreSnapshot) {
     // Fill background
     f.render_widget(
@@ -105,12 +135,18 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &mut App, snap: &StoreSnapsh
     if app.pending_focus_select {
         app.pending_focus_select = false;
         let (proj_agents, _) = filter_snap_by_project(snap, &app.current_project);
-        if let Some(agent) = proj_agents.get(app.sidebar_selected) {
-            if agent.role == AgentRole::Main && app.focused_agent.is_some() {
-                // Pressing Enter on leader while focused → unfocus
+        if let Some((_leader, party_members)) = sidebar_agents(&proj_agents) {
+            if app.sidebar_selected == 0 {
+                if app.focused_agent.is_some() {
+                    app.focused_agent = None;
+                }
+            } else if let Some(agent) = party_members.get(app.sidebar_selected.saturating_sub(1)) {
+                if agent.role != AgentRole::Main {
+                    app.focused_agent = Some(agent.agent_id.clone());
+                    app.feed_auto_scroll = true;
+                }
+            } else if app.focused_agent.is_some() {
                 app.focused_agent = None;
-            } else if agent.role != AgentRole::Main {
-                app.focused_agent = Some(agent.agent_id.clone());
                 app.feed_auto_scroll = true;
             }
         }
@@ -279,13 +315,8 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     let (proj_agents, _proj_feed) = filter_snap_by_project(snap, &app.current_project);
 
     // Find the leader (AgentRole::Main or first agent)
-    let leader = proj_agents
-        .iter()
-        .find(|a| a.role == AgentRole::Main)
-        .or_else(|| proj_agents.first());
-
-    let leader = match leader {
-        Some(l) => l,
+    let (leader, party_members) = match sidebar_agents(&proj_agents) {
+        Some(data) => data,
         None => return,
     };
 
@@ -509,19 +540,6 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         }
     }
 
-    // Party separator
-    // Party: only sub-agents spawned by the current leader session
-    let leader_id = &leader.agent_id;
-    let party_members: Vec<_> = proj_agents
-        .iter()
-        .filter(|a| {
-            a.agent_id != *leader_id
-                && (a.role == AgentRole::Subagent
-                    || a.parent_session_id.as_deref() == Some(leader_id))
-        })
-        .copied()
-        .collect();
-
     y += 1;
     if y < li.y + li.height {
         let sep = Line::from(Span::styled(
@@ -544,10 +562,19 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
 
     if use_compact {
         // ── Compact list mode: 1 line per agent ──
-        for (i, member) in party_members.iter().enumerate() {
+        let available_rows = li.y.saturating_add(li.height).saturating_sub(y) as usize;
+        let selected_party_idx = app
+            .sidebar_selected
+            .saturating_sub(1)
+            .min(party_members.len().saturating_sub(1));
+        let visible = visible_party_window(selected_party_idx, party_members.len(), available_rows);
+
+        for (row_idx, member) in party_members[visible.clone()].iter().enumerate() {
             if y >= li.y + li.height {
                 break;
             }
+
+            let i = visible.start + row_idx;
 
             let is_done = member.state == AgentState::Completed;
             let stage = chicken::agent_growth_stage(member.usage_count, is_done);
@@ -575,16 +602,20 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                 }
             };
 
-            // Truncate name to fit
-            let max_name_w = (li.width as usize).saturating_sub(status.len() + 6);
-            let short_name = truncate_to_width(&member.display_name, max_name_w);
-
-            let color = if is_focused || is_selected { sub_color } else { dim() };
-            let style = if is_focused || is_selected {
-                Style::default().fg(color).bg(Color::Rgb(40, 40, 60)).add_modifier(Modifier::BOLD)
+            let row_bg = if is_focused || is_selected {
+                Color::Rgb(40, 40, 60)
             } else {
-                Style::default().fg(color)
+                card_bg()
             };
+            let color = if is_focused || is_selected { sub_color } else { dim() };
+            let style = Style::default()
+                .fg(color)
+                .bg(row_bg)
+                .add_modifier(if is_focused || is_selected {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                });
 
             let status_color = match member.state {
                 AgentState::Active => theme().accent_green,
@@ -592,14 +623,25 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                 AgentState::Completed => dim(),
             };
 
+            let content_width = li.width as usize;
+            let (name_width, status_width) =
+                party_row_layout(content_width.saturating_sub(4), &status);
+            let short_name = truncate_to_width(&member.display_name, name_width);
+            let status_text = truncate_to_width(&status, status_width);
+            let padded_name = format!("{:<width$}", short_name, width = name_width);
+            let padded_status = format!("{:>width$}", status_text, width = status_width);
+
             let line = Line::from(vec![
                 Span::styled(format!(" {} ", stage_icon), style),
-                Span::styled(short_name, style),
-                Span::styled(" ", Style::default().bg(card_bg())),
-                Span::styled(status, Style::default().fg(status_color)),
+                Span::styled(padded_name, style),
+                Span::styled(" │ ", Style::default().fg(theme().hp_empty).bg(row_bg)),
+                Span::styled(
+                    padded_status,
+                    Style::default().fg(status_color).bg(row_bg),
+                ),
             ]);
             f.render_widget(
-                Paragraph::new(line).style(Style::default().bg(card_bg())),
+                Paragraph::new(line).style(Style::default().bg(row_bg)),
                 Rect::new(li.x, y, li.width, 1),
             );
             y += 1;
@@ -1253,4 +1295,53 @@ pub fn party_summary(snap: &StoreSnapshot) -> String {
     }
 
     parts.join(" ")
+}
+
+fn visible_party_window(selected: usize, total: usize, viewport_rows: usize) -> std::ops::Range<usize> {
+    if total == 0 || viewport_rows == 0 {
+        return 0..0;
+    }
+
+    if total <= viewport_rows {
+        return 0..total;
+    }
+
+    let selected = selected.min(total.saturating_sub(1));
+    let max_start = total.saturating_sub(viewport_rows);
+    let start = selected
+        .saturating_sub(viewport_rows.saturating_sub(1))
+        .min(max_start);
+    start..(start + viewport_rows).min(total)
+}
+
+fn party_row_layout(total_width: usize, status: &str) -> (usize, usize) {
+    let status_width = status.len().clamp(6, 12);
+    let name_width = total_width.saturating_sub(status_width + 3);
+    (name_width, status_width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{party_row_layout, visible_party_window};
+
+    #[test]
+    fn party_window_stays_at_top_when_selection_is_visible() {
+        assert_eq!(visible_party_window(2, 10, 5), 0..5);
+    }
+
+    #[test]
+    fn party_window_scrolls_when_selection_moves_below_viewport() {
+        assert_eq!(visible_party_window(7, 10, 5), 3..8);
+    }
+
+    #[test]
+    fn party_window_clamps_to_end_of_list() {
+        assert_eq!(visible_party_window(9, 10, 5), 5..10);
+    }
+
+    #[test]
+    fn party_row_layout_reserves_a_fixed_status_column() {
+        assert_eq!(party_row_layout(40, "done"), (31, 6));
+        assert_eq!(party_row_layout(40, "very-long-status"), (25, 12));
+    }
 }
