@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::protocol::normalize::tool_name_to_skill;
+use crate::protocol::normalize::{extract_ranked_command, tool_name_to_skill};
 use crate::protocol::types::*;
 
 use chrono::Utc;
@@ -88,6 +88,9 @@ impl AppStore {
                 branch_name: raw.branch_name.clone(),
                 skill_usage: HashMap::new(),
                 skills_invoked: HashMap::new(),
+                skill_last_seen: HashMap::new(),
+                command_usage: HashMap::new(),
+                command_last_seen: HashMap::new(),
                 total_tokens: 0,
                 usage_count: 0,
                 tool_run_count: 0,
@@ -132,13 +135,18 @@ impl AppStore {
             if let Some(ref detail) = raw.detail {
                 let skill_name = detail.split_whitespace().next().unwrap_or(detail);
                 *agent.skills_invoked.entry(skill_name.to_string()).or_insert(0) += 1;
+                agent.skill_last_seen.insert(skill_name.to_string(), raw.ts);
                 tracing::debug!("Skill tracked: {} for agent {}", skill_name, agent_id);
             }
         }
 
-        // Also track Skill from ToolSearch → Skill chain (tool_result with skill reference)
-        if raw.tool_name.as_deref() == Some("ToolSearch") {
-            // ToolSearch is often followed by Skill, but ToolSearch itself isn't a skill
+        if raw.event_type == RuntimeEventType::ToolStart {
+            if let Some(command_name) =
+                extract_ranked_command(raw.tool_name.as_deref(), raw.detail.as_deref())
+            {
+                *agent.command_usage.entry(command_name.clone()).or_insert(0) += 1;
+                agent.command_last_seen.insert(command_name, raw.ts);
+            }
         }
 
         let display_name = agent.display_name.clone();
@@ -334,7 +342,22 @@ impl AppStore {
                     current_skill: if *state == AgentState::Active { Some(SkillKind::Edit) } else { None },
                     branch_name:   Some(format!("feat/{name}")),
                     skill_usage,
-                    skills_invoked: HashMap::new(),
+                    skills_invoked: HashMap::from([
+                        ("superpowers:brainstorming".to_string(), 2),
+                        ("commit".to_string(), 1),
+                    ]),
+                    skill_last_seen: HashMap::from([
+                        ("superpowers:brainstorming".to_string(), now - 20),
+                        ("commit".to_string(), now - 12),
+                    ]),
+                    command_usage: HashMap::from([
+                        ("git diff".to_string(), 3),
+                        ("cargo test".to_string(), 2),
+                    ]),
+                    command_last_seen: HashMap::from([
+                        ("git diff".to_string(), now - 18),
+                        ("cargo test".to_string(), now - 10),
+                    ]),
                     total_tokens:  42_000,
                     usage_count:   28,
                     tool_run_count: 28,
@@ -502,4 +525,56 @@ fn discover_available_skills() -> Vec<String> {
     let mut result: Vec<String> = skills.into_iter().collect();
     result.sort();
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppStore;
+    use crate::protocol::types::{IngestSource, RawIngestEvent, RuntimeEventType};
+
+    fn raw_event(agent_id: &str, ts: i64, tool_name: Option<&str>, detail: Option<&str>) -> RawIngestEvent {
+        RawIngestEvent {
+            source: IngestSource::Jsonl,
+            agent_runtime_id: agent_id.to_string(),
+            session_runtime_id: Some(agent_id.to_string()),
+            ts,
+            event_type: RuntimeEventType::ToolStart,
+            hook_event_name: Some("PreToolUse".into()),
+            tool_name: tool_name.map(str::to_string),
+            file_path: None,
+            detail: detail.map(str::to_string),
+            total_tokens: None,
+            is_error: false,
+            branch_name: None,
+            slug: None,
+            cwd: Some("/tmp/project-a".into()),
+            ai_tool: Some("codex".into()),
+        }
+    }
+
+    #[test]
+    fn apply_event_tracks_normalized_commands() {
+        let mut store = AppStore::new();
+
+        store.apply_event(raw_event("agent-a", 10, Some("Bash"), Some("git diff src/main.rs")));
+        store.apply_event(raw_event("agent-a", 20, Some("Bash"), Some("git diff --stat")));
+        store.apply_event(raw_event("agent-a", 30, Some("Bash"), Some("cargo test render::tests")));
+
+        let agent = store.agents.get("agent-a").unwrap();
+        assert_eq!(agent.command_usage.get("git diff"), Some(&2));
+        assert_eq!(agent.command_usage.get("cargo test"), Some(&1));
+        assert_eq!(agent.command_last_seen.get("git diff"), Some(&20));
+    }
+
+    #[test]
+    fn apply_event_tracks_skill_last_seen() {
+        let mut store = AppStore::new();
+
+        store.apply_event(raw_event("agent-a", 10, Some("Skill"), Some("superpowers:brainstorming scope the work")));
+        store.apply_event(raw_event("agent-a", 25, Some("Skill"), Some("superpowers:brainstorming revise the spec")));
+
+        let agent = store.agents.get("agent-a").unwrap();
+        assert_eq!(agent.skills_invoked.get("superpowers:brainstorming"), Some(&2));
+        assert_eq!(agent.skill_last_seen.get("superpowers:brainstorming"), Some(&25));
+    }
 }

@@ -7,10 +7,10 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::protocol::types::{AgentRole, AgentState, FeedEvent, RuntimeEventType};
+use crate::protocol::types::{AgentRole, AgentState, FeedEvent};
 use crate::store::state::AppStore;
 use crate::tui::app::App;
-use crate::tui::render::StoreSnapshot;
+use crate::tui::render::{RankedEntry, StoreSnapshot};
 use crate::tui::sprites::chicken;
 use crate::tui::sprites::renderer::sprite_to_lines;
 use crate::tui::theme::theme;
@@ -44,7 +44,7 @@ pub fn get_projects(snap: &StoreSnapshot) -> Vec<String> {
 
 /// Normalize cwd to a canonical project name.
 /// Strips worktree paths, subdirs like src/shared/assets, etc.
-fn normalize_project_name(cwd: &str) -> String {
+pub(crate) fn normalize_project_name(cwd: &str) -> String {
     // Known project directory names to match
     let parts: Vec<&str> = cwd.split('/').collect();
     // Look for known service/app directories (skip worktree branch names)
@@ -119,6 +119,15 @@ pub fn sidebar_item_count(snap: &StoreSnapshot, project: &Option<String>) -> usi
         .unwrap_or(0)
 }
 
+pub fn main_panel_item_count(
+    snap: &StoreSnapshot,
+    project: &Option<String>,
+    focused_agent: &Option<String>,
+) -> usize {
+    let rankings = snap.stage_rankings(project.as_deref(), focused_agent.as_deref());
+    ranking_line_count(&rankings)
+}
+
 pub fn render_stage(f: &mut Frame, area: Rect, app: &mut App, snap: &StoreSnapshot) {
     // Fill background
     f.render_widget(
@@ -133,23 +142,8 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &mut App, snap: &StoreSnapsh
 
     // Resolve pending focus select (Enter key on sidebar)
     if app.pending_focus_select {
-        app.pending_focus_select = false;
         let (proj_agents, _) = filter_snap_by_project(snap, &app.current_project);
-        if let Some((_leader, party_members)) = sidebar_agents(&proj_agents) {
-            if app.sidebar_selected == 0 {
-                if app.focused_agent.is_some() {
-                    app.focused_agent = None;
-                }
-            } else if let Some(agent) = party_members.get(app.sidebar_selected.saturating_sub(1)) {
-                if agent.role != AgentRole::Main {
-                    app.focused_agent = Some(agent.agent_id.clone());
-                    app.feed_auto_scroll = true;
-                }
-            } else if app.focused_agent.is_some() {
-                app.focused_agent = None;
-                app.feed_auto_scroll = true;
-            }
-        }
+        resolve_pending_focus_select(app, &proj_agents);
     }
 
     // Project tabs + main content (focused project first)
@@ -195,7 +189,7 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &mut App, snap: &StoreSnapsh
         f.render_widget(Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(bg())), chunks[0]);
     }
 
-    // Main: left (leader + party) | right (feed)
+    // Main: left (leader + party) | right (rankings)
     let main = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(44), Constraint::Fill(1)])
@@ -420,126 +414,6 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         y += 1;
     }
 
-    // Skills: aggregate across ALL agents in project (not just leader)
-    let mut all_skills: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
-    for agent in &proj_agents {
-        for (name, count) in &agent.skills_invoked {
-            *all_skills.entry(name.as_str()).or_insert(0) += count;
-        }
-    }
-    if !all_skills.is_empty() && y + 2 < li.y + li.height {
-        let mut skills: Vec<_> = all_skills.iter().collect();
-        skills.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
-        let max_count = skills.first().map(|(_, c)| **c).unwrap_or(1).max(1);
-        let panel_w = li.width as usize;
-
-        // Header
-        y += 1;
-        let total: u64 = skills.iter().map(|(_, c)| **c).sum();
-        let header = format!(
-            " \u{26a1} skills ({}) \u{2500}{}",
-            total,
-            "\u{2500}".repeat(panel_w.saturating_sub(16))
-        );
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(header, Style::default().fg(dim()))))
-                .style(Style::default().bg(card_bg())),
-            Rect::new(li.x, y, li.width, 1),
-        );
-        y += 1;
-
-        // Each skill: name + bar + count
-        let name_col = 14usize; // fixed name column
-        let count_col = 4usize; // " 16"
-        let bar_max = panel_w.saturating_sub(name_col + count_col + 4); // remaining for bar
-
-        for (name, count) in &skills {
-            if y >= li.y + li.height {
-                break;
-            }
-
-            let short = name.rsplit(':').next().unwrap_or(name);
-            let truncated = truncate_to_width(short, name_col.saturating_sub(2));
-            let padded_name = format!(" {:<width$}", truncated, width = name_col - 1);
-
-            // Bar proportional to max
-            let ratio = **count as f64 / max_count as f64;
-            let filled = (ratio * bar_max as f64).round() as usize;
-            let empty = bar_max.saturating_sub(filled);
-            let bar_filled = "\u{2588}".repeat(filled);
-            let bar_empty = "\u{2591}".repeat(empty);
-
-            // Color gradient (7 levels)
-            let bar_color = if ratio > 0.9 {
-                Color::Rgb(255, 220, 50)
-            } else if ratio > 0.7 {
-                Color::Rgb(255, 180, 60)
-            } else if ratio > 0.5 {
-                Color::Rgb(100, 220, 140)
-            } else if ratio > 0.35 {
-                Color::Rgb(100, 200, 255)
-            } else if ratio > 0.2 {
-                Color::Rgb(180, 170, 220)
-            } else if ratio > 0.1 {
-                Color::Rgb(160, 160, 180)
-            } else {
-                dim()
-            };
-
-            let count_str = format!("{:>3}", count);
-
-            let line = Line::from(vec![
-                Span::styled(padded_name, Style::default().fg(bar_color)),
-                Span::styled(bar_filled, Style::default().fg(bar_color)),
-                Span::styled(bar_empty, Style::default().fg(theme().hp_empty)),
-                Span::styled(format!(" {}", count_str), Style::default().fg(dim())),
-            ]);
-            f.render_widget(
-                Paragraph::new(line).style(Style::default().bg(card_bg())),
-                Rect::new(li.x, y, li.width, 1),
-            );
-            y += 1;
-        }
-
-        // Unused skills — from available_skills not in used set
-        let used_set: std::collections::HashSet<&str> = all_skills.keys().copied().collect();
-        let mut unused: Vec<&str> = snap.available_skills.iter()
-            .map(|s| s.as_str())
-            .filter(|s| {
-                let short = s.rsplit(':').next().unwrap_or(s);
-                !used_set.contains(short) && !used_set.contains(*s)
-            })
-            .collect();
-        unused.sort();
-        unused.dedup();
-
-        if !unused.is_empty() && y < li.y + li.height {
-            // Render unused as dim comma-separated list
-            let unused_text: String = unused.iter()
-                .map(|s| s.rsplit(':').next().unwrap_or(s))
-                .collect::<Vec<_>>()
-                .join(" · ");
-
-            let max_w = li.width as usize;
-            let mut remaining = unused_text.as_str();
-            while !remaining.is_empty() && y < li.y + li.height {
-                let chunk = truncate_to_width(remaining, max_w.saturating_sub(2));
-                let chunk_len = chunk.chars().count();
-                f.render_widget(
-                    Paragraph::new(Line::from(Span::styled(
-                        format!(" {}", chunk),
-                        Style::default().fg(Color::Rgb(60, 60, 75)),
-                    ))).style(Style::default().bg(card_bg())),
-                    Rect::new(li.x, y, li.width, 1),
-                );
-                y += 1;
-                // Advance past the chunk
-                let skip: String = remaining.chars().take(chunk_len).collect();
-                remaining = remaining.strip_prefix(&skip).unwrap_or("").trim_start_matches(" · ");
-            }
-        }
-    }
-
     y += 1;
     if y < li.y + li.height {
         let sep = Line::from(Span::styled(
@@ -759,19 +633,10 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
 }
 
 fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot) {
-    let (proj_agents, proj_feed) = filter_snap_by_project(snap, &app.current_project);
-
-    // Build sub-agent index map: agent_id → (index, color)
-    let sub_agent_map = build_sub_agent_map(&proj_agents);
-
-    // Focus mode: filter to only focused agent's events
+    let (proj_agents, _proj_feed) = filter_snap_by_project(snap, &app.current_project);
     let focused = &app.focused_agent;
     let is_focused = focused.is_some();
-    let feed_iter: Vec<&FeedEvent> = if let Some(ref focused_id) = focused {
-        proj_feed.iter().filter(|e| e.agent_id == *focused_id).copied().collect()
-    } else {
-        proj_feed.to_vec()
-    };
+    let rankings = snap.stage_rankings(app.current_project.as_deref(), focused.as_deref());
 
     // Title changes in focus mode
     let title = if let Some(ref focused_id) = focused {
@@ -779,10 +644,9 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
             .find(|a| &a.agent_id == focused_id)
             .map(|a| a.display_name.as_str())
             .unwrap_or("agent");
-        let idx = sub_agent_map.get(focused_id.as_str()).map(|(i, _)| i + 1).unwrap_or(0);
-        format!(" \u{1f423}{} {} (Esc to return) ", idx, name)
+        format!(" rankings - {} (Esc clears) ", name)
     } else {
-        " conversation ".to_string()
+        " rankings ".to_string()
     };
 
     let block = Block::default()
@@ -803,194 +667,10 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         return;
     }
 
-    // ── Vertical timeline layout ──
-    // Spine: emoji icons (🐔🐣◇) on event lines, │ between events
-    // Layout: [elapsed 7dw] [space] [emoji 2dw] [space] [content...]
-    //          0─────────6   7       8─────9     10       11+
-    // │ at position 9 (right edge of 2-cell emoji at 8-9), content at 11
-    let filter = &app.filter_text;
-    let f_lower = filter.to_lowercase();
-
-    let max_w = (inner.width as usize).saturating_sub(1); // 1 char right padding
-    let spine_pos = 9usize;
-    let content_start = 11usize;
-    let spine_sep = format!("{}│", " ".repeat(spine_pos));
-    let cont_prefix = format!("{}│{}", " ".repeat(spine_pos), " ".repeat(content_start - spine_pos - 1));
-
-    let mut lines: Vec<Line> = Vec::new();
-    let last_ts = feed_iter.last().map(|e| e.ts).unwrap_or(0);
-    let mut prev_agent_id: Option<&str> = None;
-
-    for event in feed_iter.iter() {
-        // Apply filter
-        if !filter.is_empty() {
-            let matches = event.display_name.to_lowercase().contains(&f_lower)
-                || event.tool_name.as_deref().unwrap_or("").to_lowercase().contains(&f_lower)
-                || event.file_path.as_deref().unwrap_or("").to_lowercase().contains(&f_lower)
-                || event.detail.as_deref().unwrap_or("").to_lowercase().contains(&f_lower);
-            if !matches { continue; }
-        }
-
-        let is_latest = event.ts == last_ts;
-        let elapsed = format_elapsed(event.ts, snap, is_latest);
-        let is_sub = is_sub_agent(event, snap);
-
-        // Determine spine emoji icon (2 cells each)
-        let (marker, marker_fg) = if event.event_type == RuntimeEventType::TurnActive {
-            ("\u{25c7} ", theme().user_prompt) // ◇ + space = 2 cells for user prompt
-        } else if event.event_type == RuntimeEventType::PermissionWait {
-            ("\u{23f3}", theme().lead_name) // ⏳ waiting
-        } else if is_sub && !is_focused {
-            // Use per-agent color from palette
-            let color = sub_agent_map.get(event.agent_id.as_str())
-                .map(|(_, c)| *c)
-                .unwrap_or(theme().sub_agent_text);
-            ("\u{1f423}", color) // 🐣 sub-agent (unique color)
-        } else {
-            ("\u{1f414}", theme().assistant_text) // 🐔 main agent
-        };
-
-        // Status badge dot for tool events
-        // ToolStart: always yellow (in progress), ToolDone: green/red
-        let tool_badge: Option<(&str, Color)> = match event.event_type {
-            RuntimeEventType::ToolStart => {
-                Some(("\u{25cf}", theme().accent_yellow)) // ● yellow = in progress
-            }
-            RuntimeEventType::ToolDone => {
-                if event.is_error {
-                    Some(("\u{25cf}", theme().accent_red)) // ● red = error
-                } else {
-                    Some(("\u{25cf}", theme().accent_green)) // ● green = success
-                }
-            }
-            _ => None,
-        };
-
-        // Spine separator: only when agent changes or user prompt
-        let agent_changed = prev_agent_id.is_some_and(|prev| prev != event.agent_id);
-        let is_user_prompt = event.event_type == RuntimeEventType::TurnActive;
-        if !lines.is_empty() && (agent_changed || is_user_prompt) {
-            lines.push(Line::from(Span::styled(spine_sep.clone(), Style::default().fg(border()))));
-        }
-        prev_agent_id = Some(&event.agent_id);
-
-        // Elapsed color: "N초째/N분째" = yellow (active), others = dim
-        let elapsed_color = if is_latest && {
-            let now = chrono::Utc::now().timestamp();
-            (now - event.ts).abs() < 120
-        } {
-            theme().accent_yellow
-        } else {
-            dim()
-        };
-
-        // Build prefix: elapsed + space + marker + space
-        let mut prefix = vec![
-            Span::styled(elapsed.clone(), Style::default().fg(elapsed_color)),
-            Span::styled(" ", Style::default().bg(card_bg())),
-            Span::styled(marker, Style::default().fg(marker_fg)),
-            Span::styled(" ", Style::default().bg(card_bg())),
-        ];
-
-        // Add badge dot right after marker (before content) for tool events
-        if let Some((dot, dot_color)) = tool_badge {
-            prefix.push(Span::styled(format!("{} ", dot), Style::default().fg(dot_color)));
-        }
-
-        // Sub-agent tag no longer needed in content — spine emoji distinguishes agents
-
-        match event.event_type {
-            // User prompt
-            RuntimeEventType::TurnActive => {
-                let text = event.detail.as_deref().unwrap_or("user prompt");
-                let wrapped = wrap_with_tree(
-                    prefix,
-                    text,
-                    Style::default().fg(theme().user_prompt).add_modifier(Modifier::BOLD),
-                    &cont_prefix,
-                    max_w,
-                );
-                lines.extend(wrapped);
-            }
-
-            // Assistant text
-            RuntimeEventType::AssistantText => {
-                let text = event.detail.as_deref().unwrap_or("");
-                if text.is_empty() { continue; }
-                let mut content = String::new();
-                if let Some(ai) = event.ai_tool.as_deref() {
-                    content.push_str(crate::tui::theme::Theme::ai_tool_badge(ai));
-                    content.push(' ');
-                }
-                content.push_str(text);
-                let color = if is_sub && !is_focused {
-                    sub_agent_map.get(event.agent_id.as_str())
-                        .map(|(_, c)| *c)
-                        .unwrap_or(theme().sub_agent_text)
-                } else {
-                    theme().assistant_text
-                };
-                let wrapped = wrap_with_tree(prefix, &content, Style::default().fg(color), &cont_prefix, max_w);
-                lines.extend(wrapped);
-            }
-
-            // Tool start
-            RuntimeEventType::ToolStart => {
-                if event.tool_name.is_none() { continue; }
-                let t = theme();
-                let tool_color = match event.tool_name.as_deref().unwrap_or("") {
-                    "Read" | "Grep" | "Glob" => t.tool_read,
-                    "Edit" | "Write" => t.tool_edit,
-                    "Bash" => t.tool_bash,
-                    "Task" | "TaskCreate" | "TaskUpdate" => t.tool_task,
-                    _ => t.text,
-                };
-                let tool_text = format_tool(event);
-                let mut content = tool_text;
-                if let Some(ai) = event.ai_tool.as_deref() {
-                    content.push_str(&format!(" {}", crate::tui::theme::Theme::ai_tool_badge(ai)));
-                }
-                let wrapped = wrap_with_tree(prefix, &content, Style::default().fg(tool_color), &cont_prefix, max_w);
-                lines.extend(wrapped);
-            }
-
-            // Tool done — text color matches dot (green/red)
-            RuntimeEventType::ToolDone if event.tool_name.is_some() => {
-                let tool_text = format_tool(event);
-                let content = tool_text;
-                let done_text_color = if event.is_error { theme().accent_red } else { theme().accent_green };
-                let wrapped = wrap_with_tree(prefix, &content, Style::default().fg(done_text_color), &cont_prefix, max_w);
-                lines.extend(wrapped);
-            }
-
-            // Permission wait
-            RuntimeEventType::PermissionWait => {
-                let wrapped = wrap_with_tree(
-                    prefix,
-                    "waiting for permission...",
-                    Style::default().fg(theme().lead_name),
-                    &cont_prefix,
-                    max_w,
-                );
-                lines.extend(wrapped);
-            }
-
-            _ => {}
-        }
-    }
-
-    // Apply scroll offset (j/k keys)
+    let lines = build_rankings_lines(&rankings, inner.width as usize);
     let max_lines = inner.height as usize;
     let total = lines.len();
-    let default_start = total.saturating_sub(max_lines);
-
-    let start = if app.feed_auto_scroll {
-        default_start
-    } else {
-        // scroll_offset 0 = latest (bottom), higher = further back
-        let offset = app.feed_scroll_offset.min(total.saturating_sub(1));
-        total.saturating_sub(max_lines + offset)
-    };
+    let start = app.feed_scroll_offset.min(total.saturating_sub(max_lines));
     let end = (start + max_lines).min(total);
     let visible: Vec<Line> = lines[start..end].to_vec();
 
@@ -1000,8 +680,115 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     );
 }
 
+fn resolve_pending_focus_select(app: &mut App, proj_agents: &[&crate::protocol::types::Agent]) {
+    app.pending_focus_select = false;
+    if let Some((_leader, party_members)) = sidebar_agents(proj_agents) {
+        if app.sidebar_selected == 0 {
+            app.focused_agent = None;
+        } else if let Some(agent) = party_members.get(app.sidebar_selected.saturating_sub(1)) {
+            if agent.role != AgentRole::Main {
+                app.focused_agent = Some(agent.agent_id.clone());
+            }
+        } else {
+            app.focused_agent = None;
+        }
+    }
+    app.feed_scroll_offset = 0;
+    app.feed_auto_scroll = false;
+}
+
+fn build_rankings_lines(rankings: &crate::tui::render::StageRankings, panel_w: usize) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    append_ranking_section(
+        &mut lines,
+        " top commands (this session) ",
+        &rankings.commands,
+        panel_w,
+        false,
+    );
+    lines.push(Line::from(""));
+    append_ranking_section(
+        &mut lines,
+        " top skills (this session) ",
+        &rankings.skills,
+        panel_w,
+        true,
+    );
+    lines
+}
+
+fn ranking_line_count(rankings: &crate::tui::render::StageRankings) -> usize {
+    section_line_count(&rankings.commands) + 1 + section_line_count(&rankings.skills)
+}
+
+fn section_line_count(entries: &[RankedEntry]) -> usize {
+    1 + entries.len().max(1)
+}
+
+fn append_ranking_section(
+    lines: &mut Vec<Line<'static>>,
+    title: &str,
+    entries: &[RankedEntry],
+    panel_w: usize,
+    is_skill: bool,
+) {
+    lines.push(Line::from(Span::styled(title.to_string(), Style::default().fg(dim()))));
+    if entries.is_empty() {
+        lines.push(Line::from(Span::styled(
+            " no data yet".to_string(),
+            Style::default().fg(dim()),
+        )));
+        return;
+    }
+
+    let max_count = entries.first().map(|entry| entry.count).unwrap_or(1).max(1);
+    let name_col = if panel_w > 48 { 24usize } else { 16usize };
+    let count_col = 4usize;
+    let bar_max = panel_w.saturating_sub(name_col + count_col + 4).max(6);
+
+    for entry in entries {
+        let label = if is_skill {
+            entry.name.rsplit(':').next().unwrap_or(&entry.name).to_string()
+        } else {
+            entry.name.clone()
+        };
+        let truncated = truncate_to_width(&label, name_col.saturating_sub(2));
+        let padded_name = format!(" {:<width$}", truncated, width = name_col - 1);
+        let ratio = entry.count as f64 / max_count as f64;
+        let filled = (ratio * bar_max as f64).round() as usize;
+        let empty = bar_max.saturating_sub(filled);
+        let count_str = format!("{:>3}", entry.count);
+        let bar_color = ranking_bar_color(ratio);
+        lines.push(Line::from(vec![
+            Span::styled(padded_name, Style::default().fg(bar_color)),
+            Span::styled("\u{2588}".repeat(filled), Style::default().fg(bar_color)),
+            Span::styled("\u{2591}".repeat(empty), Style::default().fg(theme().hp_empty)),
+            Span::styled(format!(" {}", count_str), Style::default().fg(dim())),
+        ]));
+    }
+}
+
+fn ranking_bar_color(ratio: f64) -> Color {
+    if ratio > 0.9 {
+        Color::Rgb(255, 220, 50)
+    } else if ratio > 0.7 {
+        Color::Rgb(255, 180, 60)
+    } else if ratio > 0.5 {
+        Color::Rgb(100, 220, 140)
+    } else if ratio > 0.35 {
+        Color::Rgb(100, 200, 255)
+    } else if ratio > 0.2 {
+        Color::Rgb(180, 170, 220)
+    } else if ratio > 0.1 {
+        Color::Rgb(160, 160, 180)
+    } else {
+        dim()
+    }
+}
+
 // --- Helpers ---
 
+#[allow(dead_code)]
 fn is_korean_locale() -> bool {
     std::env::var("LANG")
         .or_else(|_| std::env::var("LC_ALL"))
@@ -1010,6 +797,7 @@ fn is_korean_locale() -> bool {
         .unwrap_or(false)
 }
 
+#[allow(dead_code)]
 fn format_elapsed(ts: i64, _snap: &StoreSnapshot, is_latest: bool) -> String {
     let now = chrono::Utc::now().timestamp();
     let diff = (now - ts).max(0);
@@ -1042,6 +830,7 @@ fn format_elapsed(ts: i64, _snap: &StoreSnapshot, is_latest: bool) -> String {
 }
 
 /// Compute display width of a string (handles CJK, emoji).
+#[allow(dead_code)]
 fn display_width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }
@@ -1056,6 +845,7 @@ fn display_width(s: &str) -> usize {
 /// `text_style`: style for the text
 /// `tree_cont`: the tree continuation string for wrapped lines (e.g. " │      ")
 /// `max_width`: available width
+#[allow(dead_code)]
 fn wrap_with_tree<'a>(
     prefix_spans: Vec<Span<'a>>,
     text: &str,
@@ -1134,6 +924,7 @@ fn wrap_with_tree<'a>(
 }
 
 /// Split text into chunks: first chunk fits `first_width`, rest fit `cont_width`.
+#[allow(dead_code)]
 fn split_by_width(text: &str, first_width: usize, cont_width: usize) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut chars = text.chars().peekable();
@@ -1189,6 +980,7 @@ fn truncate_to_width(s: &str, max_width: usize) -> String {
     result
 }
 
+#[allow(dead_code)]
 fn is_sub_agent(e: &FeedEvent, snap: &StoreSnapshot) -> bool {
     snap.agents
         .iter()
@@ -1198,6 +990,7 @@ fn is_sub_agent(e: &FeedEvent, snap: &StoreSnapshot) -> bool {
 }
 
 /// Build a map of sub-agent agent_id → (index, color) for consistent numbering
+#[allow(dead_code)]
 fn build_sub_agent_map<'a>(
     agents: &[&'a crate::protocol::types::Agent],
 ) -> std::collections::HashMap<&'a str, (usize, Color)> {
@@ -1234,6 +1027,7 @@ fn sub_agent_stage_icon(e: &FeedEvent, snap: &StoreSnapshot) -> &'static str {
         .unwrap_or("\u{1f95a}")
 }
 
+#[allow(dead_code)]
 fn format_tool(e: &FeedEvent) -> String {
     let tool = e.tool_name.as_deref().unwrap_or("?");
     let path = e.file_path.as_deref().unwrap_or("");
@@ -1322,7 +1116,37 @@ fn party_row_layout(total_width: usize, status: &str) -> (usize, usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{party_row_layout, visible_party_window};
+    use super::{party_row_layout, resolve_pending_focus_select, visible_party_window};
+    use crate::protocol::types::{Agent, AgentRole, AgentState, SkillKind};
+    use crate::tui::app::App;
+    use std::collections::HashMap;
+
+    fn make_agent(agent_id: &str, role: AgentRole, parent_session_id: Option<&str>) -> Agent {
+        Agent {
+            agent_id: agent_id.to_string(),
+            display_name: agent_id.to_string(),
+            short_id: agent_id.chars().take(8).collect(),
+            state: AgentState::Active,
+            role,
+            current_skill: Some(SkillKind::Bash),
+            branch_name: None,
+            skill_usage: HashMap::new(),
+            skills_invoked: HashMap::new(),
+            skill_last_seen: HashMap::new(),
+            command_usage: HashMap::new(),
+            command_last_seen: HashMap::new(),
+            total_tokens: 0,
+            usage_count: 0,
+            tool_run_count: 0,
+            last_event_ts: 0,
+            context_percent: None,
+            cost_usd: None,
+            model_name: None,
+            cwd: Some("/tmp/project-a".to_string()),
+            ai_tool: None,
+            parent_session_id: parent_session_id.map(|id| id.to_string()),
+        }
+    }
 
     #[test]
     fn party_window_stays_at_top_when_selection_is_visible() {
@@ -1343,5 +1167,39 @@ mod tests {
     fn party_row_layout_reserves_a_fixed_status_column() {
         assert_eq!(party_row_layout(40, "done"), (31, 6));
         assert_eq!(party_row_layout(40, "very-long-status"), (25, 12));
+    }
+
+    #[test]
+    fn resolve_pending_focus_select_sets_focused_agent_for_selected_party_member() {
+        let leader = make_agent("lead", AgentRole::Main, None);
+        let scout = make_agent("scout", AgentRole::Subagent, Some("lead"));
+        let mut app = App::new(8080);
+        app.pending_focus_select = true;
+        app.sidebar_selected = 1;
+        app.focused_agent = None;
+        app.feed_scroll_offset = 9;
+
+        resolve_pending_focus_select(&mut app, &[&leader, &scout]);
+
+        assert_eq!(app.focused_agent.as_deref(), Some("scout"));
+        assert_eq!(app.feed_scroll_offset, 0);
+        assert!(!app.pending_focus_select);
+    }
+
+    #[test]
+    fn resolve_pending_focus_select_clears_focus_when_leader_is_selected() {
+        let leader = make_agent("lead", AgentRole::Main, None);
+        let scout = make_agent("scout", AgentRole::Subagent, Some("lead"));
+        let mut app = App::new(8080);
+        app.pending_focus_select = true;
+        app.sidebar_selected = 0;
+        app.focused_agent = Some("scout".to_string());
+        app.feed_scroll_offset = 4;
+
+        resolve_pending_focus_select(&mut app, &[&leader, &scout]);
+
+        assert_eq!(app.focused_agent, None);
+        assert_eq!(app.feed_scroll_offset, 0);
+        assert!(!app.pending_focus_select);
     }
 }

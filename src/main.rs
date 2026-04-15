@@ -284,7 +284,12 @@ async fn main() -> Result<()> {
         let snap = StoreSnapshot::from_store(&shared_store).await;
         let sidebar_count =
             crate::tui::widgets::stage::sidebar_item_count(&snap, &app.current_project);
-        app.update_counts(sidebar_count, snap.feed.len(), snap.sessions.len());
+        let main_panel_count = crate::tui::widgets::stage::main_panel_item_count(
+            &snap,
+            &app.current_project,
+            &app.focused_agent,
+        );
+        app.update_counts(sidebar_count, main_panel_count, snap.sessions.len());
         terminal.draw(|f| render::draw(f, &mut app, &snap))?;
 
         match event_handler.next()? {
