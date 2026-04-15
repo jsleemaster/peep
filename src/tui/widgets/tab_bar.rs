@@ -78,7 +78,7 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         ));
     }
 
-    let hint = "q:quit j/k:scroll []:project Enter:agent";
+    let hint = "q:quit j/k:scroll []:project Enter:filter";
     let left_len: usize = stats.iter().map(|s| s.content.chars().count()).sum();
     let padding = (area.width as usize).saturating_sub(left_len + hint.chars().count() + 2);
     stats.push(Span::raw(" ".repeat(padding)));

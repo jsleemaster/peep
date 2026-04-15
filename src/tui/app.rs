@@ -20,8 +20,6 @@ pub struct App {
     pub sidebar_selected: usize,
     pub sidebar_count: usize,
     pub feed_scroll_offset: usize,
-
-    // Auto-scroll: true when user hasn't scrolled up
     pub feed_auto_scroll: bool,
 
     // Cached counts for scroll bounds (updated each frame from store snapshot)
@@ -37,9 +35,9 @@ pub struct App {
     pub current_project: Option<String>,  // selected cwd, None = all
     pub project_index: usize,             // index into project list
 
-    // Sub-agent focus mode: when set, conversation shows only this agent's events
-    pub focused_agent: Option<String>,    // agent_id of focused sub-agent
-    pub pending_focus_select: bool,       // set by Enter key, resolved by renderer
+    // Agent filter mode: when set, rankings show only this agent's data
+    pub focused_agent: Option<String>,
+    pub pending_focus_select: bool,
 }
 
 impl App {
@@ -54,7 +52,7 @@ impl App {
             sidebar_selected: 0,
             sidebar_count: 0,
             feed_scroll_offset: 0,
-            feed_auto_scroll: true,
+            feed_auto_scroll: false,
             agent_count: 0,
             feed_count: 0,
             session_count: 0,
@@ -73,11 +71,7 @@ impl App {
         self.agent_count = sidebar_count;
         self.feed_count = feed_count;
         self.session_count = session_count;
-
-        // Auto-scroll feed to bottom
-        if self.feed_auto_scroll && feed_count > 0 {
-            self.feed_scroll_offset = feed_count.saturating_sub(1);
-        }
+        self.feed_scroll_offset = self.feed_scroll_offset.min(feed_count.saturating_sub(1));
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -131,9 +125,10 @@ impl App {
             other => other,
         };
 
-        // Esc exits focus mode first, then normal behavior
+        // Esc exits agent filter first, then normal behavior
         if code == KeyCode::Esc && self.focused_agent.is_some() {
             self.focused_agent = None;
+            self.feed_scroll_offset = 0;
             return;
         }
 
@@ -150,10 +145,9 @@ impl App {
             KeyCode::Char('g') => self.scroll_to_top(),
             KeyCode::Char('G') => self.scroll_to_bottom(),
 
-            // Enter: in sidebar = focus on selected agent's conversation
+            // Enter: in sidebar = filter rankings by selected agent
             KeyCode::Enter => {
                 if self.focus == FocusPane::Sidebar {
-                    // agent_id will be resolved by the renderer from sidebar_selected
                     self.pending_focus_select = true;
                 }
             }
@@ -171,6 +165,7 @@ impl App {
             // Esc: exit focus mode or do nothing
             KeyCode::Esc => {
                 self.focused_agent = None;
+                self.feed_scroll_offset = 0;
             }
 
             _ => {}
@@ -200,9 +195,6 @@ impl App {
                 if self.feed_scroll_offset < max {
                     self.feed_scroll_offset += 1;
                 }
-                if self.feed_scroll_offset >= self.feed_count.saturating_sub(1) {
-                    self.feed_auto_scroll = true;
-                }
             }
         }
     }
@@ -215,7 +207,6 @@ impl App {
             FocusPane::MainPanel => {
                 if self.feed_scroll_offset > 0 {
                     self.feed_scroll_offset = self.feed_scroll_offset.saturating_sub(1);
-                    self.feed_auto_scroll = false;
                 }
             }
         }
@@ -226,7 +217,6 @@ impl App {
             FocusPane::Sidebar => self.sidebar_selected = 0,
             FocusPane::MainPanel => {
                 self.feed_scroll_offset = 0;
-                self.feed_auto_scroll = false;
             }
         }
     }
@@ -238,7 +228,6 @@ impl App {
             }
             FocusPane::MainPanel => {
                 self.feed_scroll_offset = self.feed_count.saturating_sub(1);
-                self.feed_auto_scroll = true;
             }
         }
     }

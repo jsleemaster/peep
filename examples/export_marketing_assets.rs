@@ -168,6 +168,7 @@ fn snapshot_from_store(store: &AppStore) -> StoreSnapshot {
         sessions: store.sessions.clone(),
         sparkline: store.velocity_sparkline_data(15, now),
         metrics: store.derived_metrics(now),
+        available_skills: store.available_skills.clone(),
     }
 }
 

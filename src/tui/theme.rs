@@ -180,6 +180,7 @@ impl Theme {
     }
 
     /// Short badge label for an AI tool (e.g. "[C]").
+    #[allow(dead_code)]
     pub fn ai_tool_badge(tool: &str) -> &'static str {
         match tool {
             "claude" => "[C]",
