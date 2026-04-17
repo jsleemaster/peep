@@ -7,24 +7,34 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+use crate::protocol::normalize::normalize_project_name;
 use crate::protocol::types::{AgentRole, AgentState, FeedEvent};
 use crate::store::state::AppStore;
-use crate::tui::app::App;
+use crate::tui::app::{App, RankingsSection};
 use crate::tui::render::{RankedEntry, StoreSnapshot};
 use crate::tui::sprites::chicken;
-use crate::tui::sprites::renderer::sprite_to_lines;
+use crate::tui::sprites::renderer::{sprite_to_lines, sprite_to_lines_compact};
 use crate::tui::theme::theme;
 
-fn bg() -> Color { theme().bg }
-fn card_bg() -> Color { theme().card_bg }
-fn dim() -> Color { theme().text_dim }
-fn border() -> Color { theme().border }
+fn bg() -> Color {
+    theme().bg
+}
+fn card_bg() -> Color {
+    theme().card_bg
+}
+fn dim() -> Color {
+    theme().text_dim
+}
+fn border() -> Color {
+    theme().border
+}
 
 /// Get unique project names from agents
 pub fn get_projects(snap: &StoreSnapshot) -> Vec<String> {
     // Group by normalized project name, track most recent timestamp
     // Multiple cwds (worktrees, subdirs) map to the same project name
-    let mut project_ts: std::collections::HashMap<String, (i64, String)> = std::collections::HashMap::new();
+    let mut project_ts: std::collections::HashMap<String, (i64, String)> =
+        std::collections::HashMap::new();
     for agent in &snap.agents {
         if let Some(ref cwd) = agent.cwd {
             let name = normalize_project_name(cwd);
@@ -42,28 +52,6 @@ pub fn get_projects(snap: &StoreSnapshot) -> Vec<String> {
     projects.into_iter().map(|(name, _)| name).collect()
 }
 
-/// Normalize cwd to a canonical project name.
-/// Strips worktree paths, subdirs like src/shared/assets, etc.
-pub(crate) fn normalize_project_name(cwd: &str) -> String {
-    // Known project directory names to match
-    let parts: Vec<&str> = cwd.split('/').collect();
-    // Look for known service/app directories (skip worktree branch names)
-    // Pattern: .../platform/services/<name> or .../platform/app/<name> or last component
-    for (i, part) in parts.iter().enumerate() {
-        if (*part == "services" || *part == "app") && i + 1 < parts.len() {
-            return parts[i + 1].to_string();
-        }
-    }
-    // Fallback: last non-empty path component that isn't a common subdir
-    let skip = ["src", "shared", "assets", "images", "ui", "components", ".claude", "mcp"];
-    for part in parts.iter().rev() {
-        if !part.is_empty() && !skip.contains(part) {
-            return part.to_string();
-        }
-    }
-    cwd.rsplit('/').next().unwrap_or(cwd).to_string()
-}
-
 /// Shorten cwd to project name
 fn short_project_name(cwd: &str) -> &str {
     cwd.rsplit('/').next().unwrap_or(cwd)
@@ -76,22 +64,34 @@ fn filter_snap_by_project<'a>(
 ) -> (Vec<&'a crate::protocol::types::Agent>, Vec<&'a FeedEvent>) {
     match project {
         Some(proj_name) => {
-            let agents: Vec<_> = snap.agents.iter()
-                .filter(|a| a.cwd.as_deref().map(normalize_project_name).as_deref() == Some(proj_name.as_str()))
+            let agents: Vec<_> = snap
+                .agents
+                .iter()
+                .filter(|a| {
+                    a.cwd.as_deref().map(normalize_project_name).as_deref()
+                        == Some(proj_name.as_str())
+                })
                 .collect();
-            let agent_ids: std::collections::HashSet<_> = agents.iter().map(|a| &a.agent_id).collect();
-            let feed: Vec<_> = snap.feed.iter().filter(|e| agent_ids.contains(&e.agent_id)).collect();
+            let agent_ids: std::collections::HashSet<_> =
+                agents.iter().map(|a| &a.agent_id).collect();
+            let feed: Vec<_> = snap
+                .feed
+                .iter()
+                .filter(|e| agent_ids.contains(&e.agent_id))
+                .collect();
             (agents, feed)
         }
-        None => {
-            (snap.agents.iter().collect(), snap.feed.iter().collect())
-        }
+        None => (snap.agents.iter().collect(), snap.feed.iter().collect()),
     }
 }
 
 fn sidebar_agents<'a>(
     proj_agents: &[&'a crate::protocol::types::Agent],
-) -> Option<(&'a crate::protocol::types::Agent, Vec<&'a crate::protocol::types::Agent>)> {
+    now: i64,
+) -> Option<(
+    &'a crate::protocol::types::Agent,
+    Vec<&'a crate::protocol::types::Agent>,
+)> {
     let leader = proj_agents
         .iter()
         .find(|a| a.role == AgentRole::Main)
@@ -105,6 +105,7 @@ fn sidebar_agents<'a>(
             a.agent_id != *leader_id
                 && (a.role == AgentRole::Subagent
                     || a.parent_session_id.as_deref() == Some(leader_id))
+                && a.visible_in_party(now)
         })
         .copied()
         .collect();
@@ -114,26 +115,22 @@ fn sidebar_agents<'a>(
 
 pub fn sidebar_item_count(snap: &StoreSnapshot, project: &Option<String>) -> usize {
     let (proj_agents, _) = filter_snap_by_project(snap, project);
-    sidebar_agents(&proj_agents)
+    sidebar_agents(&proj_agents, chrono::Utc::now().timestamp())
         .map(|(_, party_members)| 1 + party_members.len())
         .unwrap_or(0)
 }
 
-pub fn main_panel_item_count(
-    snap: &StoreSnapshot,
-    project: &Option<String>,
-    focused_agent: &Option<String>,
-) -> usize {
-    let rankings = snap.stage_rankings(project.as_deref(), focused_agent.as_deref());
-    ranking_line_count(&rankings)
+pub fn main_panel_item_counts(snap: &StoreSnapshot) -> (usize, usize, usize) {
+    (
+        snap.rankings.commands.len(),
+        snap.rankings.skills.len(),
+        snap.rankings.agents.len(),
+    )
 }
 
 pub fn render_stage(f: &mut Frame, area: Rect, app: &mut App, snap: &StoreSnapshot) {
     // Fill background
-    f.render_widget(
-        Paragraph::new("").style(Style::default().bg(bg())),
-        area,
-    );
+    f.render_widget(Paragraph::new("").style(Style::default().bg(bg())), area);
 
     if snap.agents.is_empty() && snap.feed.is_empty() {
         render_empty_party(f, area, app.port, app.tick);
@@ -177,16 +174,25 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &mut App, snap: &StoreSnapsh
             let name = short_project_name(proj);
             let is_selected = app.current_project.as_deref() == Some(proj);
             let style = if is_selected {
-                Style::default().fg(theme().lead_badge_fg).bg(theme().lead_badge_bg).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme().lead_badge_fg)
+                    .bg(theme().lead_badge_bg)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(dim()).bg(bg())
             };
             tab_spans.push(Span::styled(format!(" {} ", name), style));
             if i < projects.len() - 1 {
-                tab_spans.push(Span::styled(" \u{2502} ", Style::default().fg(theme().hp_empty).bg(bg())));
+                tab_spans.push(Span::styled(
+                    " \u{2502} ",
+                    Style::default().fg(theme().hp_empty).bg(bg()),
+                ));
             }
         }
-        f.render_widget(Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(bg())), chunks[0]);
+        f.render_widget(
+            Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(bg())),
+            chunks[0],
+        );
     }
 
     // Main: left (leader + party) | right (rankings)
@@ -200,6 +206,10 @@ pub fn render_stage(f: &mut Frame, area: Rect, app: &mut App, snap: &StoreSnapsh
 }
 
 fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
     // Fill background
     f.render_widget(
         Paragraph::new("").style(Style::default().bg(card_bg())),
@@ -220,7 +230,7 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
     let center_x = area.x + area.width / 2;
 
     // Draw chicken centered
-    let sprite_w = 28u16; // 14px * 2
+    let sprite_w = 28u16.min(area.width); // 14px * 2
     let sprite_x = center_x.saturating_sub(sprite_w / 2);
     for (j, line) in chicken_lines.iter().enumerate() {
         let y = start_y + j as u16;
@@ -238,10 +248,13 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
     // Title
     if text_y < area.y + area.height {
         let title = Line::from(vec![
-            Span::styled("peep", Style::default().fg(t.brand).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "peep",
+                Style::default().fg(t.brand).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" — AI agent monitor", Style::default().fg(t.text_dim)),
         ]);
-        let title_w = 30u16;
+        let title_w = 30u16.min(area.width);
         f.render_widget(
             Paragraph::new(title).style(Style::default().bg(card_bg())),
             Rect::new(center_x.saturating_sub(title_w / 2), text_y, title_w, 1),
@@ -255,7 +268,7 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
             "Start any AI coding tool or run peep --mock",
             Style::default().fg(t.text_dim),
         ));
-        let sub_w = 46u16;
+        let sub_w = 46u16.min(area.width);
         f.render_widget(
             Paragraph::new(sub).style(Style::default().bg(card_bg())),
             Rect::new(center_x.saturating_sub(sub_w / 2), sub_y, sub_w, 1),
@@ -274,7 +287,7 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
             Span::styled(" · ", Style::default().fg(t.text_dim)),
             Span::styled("OpenCode", Style::default().fg(t.ai_opencode)),
         ]);
-        let tools_w = 40u16;
+        let tools_w = 40u16.min(area.width);
         f.render_widget(
             Paragraph::new(tools).style(Style::default().bg(card_bg())),
             Rect::new(center_x.saturating_sub(tools_w / 2), tools_y, tools_w, 1),
@@ -287,12 +300,14 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
         let dot_count = (tick / 500) % 4;
         let dots = ".".repeat(dot_count);
         let waiting = format!("waiting{:<3}", dots);
+        let waiting_w = 12u16.min(area.width);
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 waiting,
                 Style::default().fg(t.text_dim),
-            ))).style(Style::default().bg(card_bg())),
-            Rect::new(center_x.saturating_sub(6), dots_y, 12, 1),
+            )))
+            .style(Style::default().bg(card_bg())),
+            Rect::new(center_x.saturating_sub(waiting_w / 2), dots_y, waiting_w, 1),
         );
     }
 }
@@ -309,7 +324,8 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     let (proj_agents, _proj_feed) = filter_snap_by_project(snap, &app.current_project);
 
     // Find the leader (AgentRole::Main or first agent)
-    let (leader, party_members) = match sidebar_agents(&proj_agents) {
+    let (leader, party_members) = match sidebar_agents(&proj_agents, chrono::Utc::now().timestamp())
+    {
         Some(data) => data,
         None => return,
     };
@@ -346,8 +362,8 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     } else {
         chicken::chicken_idle(tick / 4)
     };
-    let chicken_lines = sprite_to_lines(&chicken_pixels, card_bg());
-    let cw = 28u16;
+    let chicken_lines = sprite_to_lines_compact(&chicken_pixels, card_bg());
+    let cw = 14u16.min(li.width);
     let cx = li.x + (li.width.saturating_sub(cw)) / 2;
     for (j, line) in chicken_lines.iter().enumerate() {
         let sy = y + j as u16;
@@ -358,7 +374,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             );
         }
     }
-    y += chicken_lines.len() as u16 + 1; // padding after chicken
+    y += chicken_lines.len() as u16; // padding after chicken
 
     // Leader stats: HP bar (100% = full health, decreases as context fills up)
     if y < li.y + li.height {
@@ -390,18 +406,12 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
 
         let hp_line = Line::from(vec![
             Span::styled(" HP ", Style::default().fg(dim())),
-            Span::styled(
-                "\u{2588}".repeat(filled),
-                Style::default().fg(hp_color),
-            ),
+            Span::styled("\u{2588}".repeat(filled), Style::default().fg(hp_color)),
             Span::styled(
                 "\u{2591}".repeat(empty),
                 Style::default().fg(theme().hp_empty),
             ),
-            Span::styled(
-                format!(" {:.0}%", ctx_pct),
-                Style::default().fg(hp_color),
-            ),
+            Span::styled(format!(" {:.0}%", ctx_pct), Style::default().fg(hp_color)),
             Span::styled(
                 format!("  {} {}", tokens_str, cost_str),
                 Style::default().fg(dim()),
@@ -462,8 +472,8 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             };
             let sub_color = theme().sub_agent_color(i);
             let is_focused = app.focused_agent.as_deref() == Some(&member.agent_id);
-            let is_selected = app.focus == crate::tui::app::FocusPane::Sidebar
-                && app.sidebar_selected == i + 1;
+            let is_selected =
+                app.focus == crate::tui::app::FocusPane::Sidebar && app.sidebar_selected == i + 1;
 
             // Status text
             let status = if let Some(tool) = &member.current_skill {
@@ -481,15 +491,20 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             } else {
                 card_bg()
             };
-            let color = if is_focused || is_selected { sub_color } else { dim() };
-            let style = Style::default()
-                .fg(color)
-                .bg(row_bg)
-                .add_modifier(if is_focused || is_selected {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                });
+            let color = if is_focused || is_selected {
+                sub_color
+            } else {
+                dim()
+            };
+            let style =
+                Style::default()
+                    .fg(color)
+                    .bg(row_bg)
+                    .add_modifier(if is_focused || is_selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    });
 
             let status_color = match member.state {
                 AgentState::Active => theme().accent_green,
@@ -509,10 +524,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                 Span::styled(format!(" {} ", stage_icon), style),
                 Span::styled(padded_name, style),
                 Span::styled(" │ ", Style::default().fg(theme().hp_empty).bg(row_bg)),
-                Span::styled(
-                    padded_status,
-                    Style::default().fg(status_color).bg(row_bg),
-                ),
+                Span::styled(padded_status, Style::default().fg(status_color).bg(row_bg)),
             ]);
             f.render_widget(
                 Paragraph::new(line).style(Style::default().bg(row_bg)),
@@ -524,7 +536,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
         // ── Sprite grid mode: 2-column grid with pixel art ──
         let cols = 2u16;
         let col_w = li.width / cols;
-        let row_h = 8u16;
+        let row_h = 7u16;
 
         for (i, member) in party_members.iter().enumerate() {
             let col = (i as u16) % cols;
@@ -550,8 +562,13 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                 _ => chicken::egg_sprite(),
             };
 
-            let spr_lines = sprite_to_lines(&sprite, card_bg());
-            let spr_w = if stage == "egg" || stage == "hatching" { 12u16 } else { 16u16 };
+            let spr_lines = sprite_to_lines_compact(&sprite, card_bg());
+            let spr_w = if stage == "egg" || stage == "hatching" {
+                6u16
+            } else {
+                8u16
+            }
+            .min(col_w);
             let spr_x = mx + (col_w.saturating_sub(spr_w)) / 2;
 
             for (j, line) in spr_lines.iter().enumerate() {
@@ -579,15 +596,21 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             let name_y = my + spr_lines.len() as u16;
             if name_y < li.y + li.height {
                 let stage_icon = match stage {
-                    "egg" => "\u{1f95a}", "hatching" => "\u{1fab6}", "peeking" => "\u{1f425}",
-                    "chick" => "\u{1f423}", "done" => "\u{2b50}", _ => "",
+                    "egg" => "\u{1f95a}",
+                    "hatching" => "\u{1fab6}",
+                    "peeking" => "\u{1f425}",
+                    "chick" => "\u{1f423}",
+                    "done" => "\u{2b50}",
+                    _ => "",
                 };
                 let sub_color = theme().sub_agent_color(i);
                 let is_focused = app.focused_agent.as_deref() == Some(&member.agent_id);
                 let is_selected = app.focus == crate::tui::app::FocusPane::Sidebar
                     && app.sidebar_selected == i + 1;
                 let label = format!("[{}] {}", stage_icon, member.display_name);
-                let color = if is_focused || is_selected { sub_color } else {
+                let color = if is_focused || is_selected {
+                    sub_color
+                } else {
                     match stage {
                         "egg" => Color::Rgb(200, 195, 180),
                         "hatching" | "peeking" => Color::Rgb(230, 200, 100),
@@ -596,14 +619,19 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                     }
                 };
                 let style = if is_focused || is_selected {
-                    Style::default().fg(color).bg(Color::Rgb(40, 40, 60)).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(color)
+                        .bg(Color::Rgb(40, 40, 60))
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(color)
                 };
                 f.render_widget(
                     Paragraph::new(Line::from(Span::styled(
-                        format!("{:^width$}", label, width = col_w as usize), style,
-                    ))).style(Style::default().bg(card_bg())),
+                        format!("{:^width$}", label, width = col_w as usize),
+                        style,
+                    )))
+                    .style(Style::default().bg(card_bg())),
                     Rect::new(mx, name_y, col_w, 1),
                 );
             }
@@ -619,16 +647,23 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                         AgentState::Completed => "done".to_string(),
                     }
                 };
-                let sc = if is_done { dim() } else if is_waiting { theme().accent_yellow } else { theme().accent_green };
+                let sc = if is_done {
+                    dim()
+                } else if is_waiting {
+                    theme().accent_yellow
+                } else {
+                    theme().accent_green
+                };
                 f.render_widget(
                     Paragraph::new(Line::from(Span::styled(
                         format!("{:^width$}", status, width = col_w as usize),
                         Style::default().fg(sc),
-                    ))).style(Style::default().bg(card_bg())),
-                Rect::new(mx, state_y, col_w, 1),
-            );
+                    )))
+                    .style(Style::default().bg(card_bg())),
+                    Rect::new(mx, state_y, col_w, 1),
+                );
+            }
         }
-    }
     } // end adaptive party
 }
 
@@ -636,11 +671,12 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     let (proj_agents, _proj_feed) = filter_snap_by_project(snap, &app.current_project);
     let focused = &app.focused_agent;
     let is_focused = focused.is_some();
-    let rankings = snap.stage_rankings(app.current_project.as_deref(), focused.as_deref());
+    let rankings = &snap.rankings;
 
     // Title changes in focus mode
-    let title = if let Some(ref focused_id) = focused {
-        let name = proj_agents.iter()
+    let mut title = if let Some(ref focused_id) = focused {
+        let name = proj_agents
+            .iter()
             .find(|a| &a.agent_id == focused_id)
             .map(|a| a.display_name.as_str())
             .unwrap_or("agent");
@@ -648,14 +684,25 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     } else {
         " rankings ".to_string()
     };
+    if rankings.warming {
+        title.push_str(" warming ");
+    }
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(if is_focused { theme().accent_yellow } else { border() }))
+        .border_style(Style::default().fg(if is_focused {
+            theme().accent_yellow
+        } else {
+            border()
+        }))
         .title(title)
         .title_style(
             Style::default()
-                .fg(if is_focused { theme().accent_yellow } else { theme().text_bright })
+                .fg(if is_focused {
+                    theme().accent_yellow
+                } else {
+                    theme().text_bright
+                })
                 .add_modifier(Modifier::BOLD),
         )
         .style(Style::default().bg(card_bg()));
@@ -667,22 +714,54 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         return;
     }
 
-    let lines = build_rankings_lines(&rankings, inner.width as usize);
-    let max_lines = inner.height as usize;
-    let total = lines.len();
-    let start = app.feed_scroll_offset.min(total.saturating_sub(max_lines));
-    let end = (start + max_lines).min(total);
-    let visible: Vec<Line> = lines[start..end].to_vec();
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Fill(1),
+            Constraint::Fill(1),
+            Constraint::Fill(1),
+        ])
+        .split(inner);
 
-    f.render_widget(
-        Paragraph::new(visible).style(Style::default().bg(card_bg())),
-        inner,
+    render_rankings_summary(f, sections[0], rankings);
+    render_rankings_section(
+        f,
+        sections[1],
+        "commands",
+        &rankings.commands,
+        app.commands_scroll_offset,
+        app.rankings_section == RankingsSection::Commands
+            && app.focus == crate::tui::app::FocusPane::MainPanel,
+        false,
+    );
+    render_rankings_section(
+        f,
+        sections[2],
+        "skills",
+        &rankings.skills,
+        app.skills_scroll_offset,
+        app.rankings_section == RankingsSection::Skills
+            && app.focus == crate::tui::app::FocusPane::MainPanel,
+        true,
+    );
+    render_rankings_section(
+        f,
+        sections[3],
+        "agents",
+        &rankings.agents,
+        app.agents_scroll_offset,
+        app.rankings_section == RankingsSection::Agents
+            && app.focus == crate::tui::app::FocusPane::MainPanel,
+        false,
     );
 }
 
 fn resolve_pending_focus_select(app: &mut App, proj_agents: &[&crate::protocol::types::Agent]) {
     app.pending_focus_select = false;
-    if let Some((_leader, party_members)) = sidebar_agents(proj_agents) {
+    if let Some((_leader, party_members)) =
+        sidebar_agents(proj_agents, chrono::Utc::now().timestamp())
+    {
         if app.sidebar_selected == 0 {
             app.focused_agent = None;
         } else if let Some(agent) = party_members.get(app.sidebar_selected.saturating_sub(1)) {
@@ -693,79 +772,219 @@ fn resolve_pending_focus_select(app: &mut App, proj_agents: &[&crate::protocol::
             app.focused_agent = None;
         }
     }
-    app.feed_scroll_offset = 0;
-    app.feed_auto_scroll = false;
+    app.commands_scroll_offset = 0;
+    app.skills_scroll_offset = 0;
+    app.agents_scroll_offset = 0;
 }
 
-fn build_rankings_lines(rankings: &crate::tui::render::StageRankings, panel_w: usize) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    append_ranking_section(
-        &mut lines,
-        " top commands (this session) ",
-        &rankings.commands,
-        panel_w,
-        false,
+fn render_rankings_summary(
+    f: &mut Frame,
+    area: Rect,
+    rankings: &crate::tui::render::StageRankings,
+) {
+    if area.height == 0 {
+        return;
+    }
+    let summary = Line::from(vec![
+        Span::styled(
+            format!(" {} ", rankings.window.label()),
+            Style::default()
+                .fg(theme().lead_badge_fg)
+                .bg(theme().lead_badge_bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" agents:{} ", rankings.agents_used),
+            Style::default().fg(theme().text_bright),
+        ),
+        Span::styled(
+            format!(" completed:{} ", rankings.completed),
+            Style::default().fg(dim()),
+        ),
+    ]);
+    f.render_widget(
+        Paragraph::new(summary).style(Style::default().bg(card_bg())),
+        area,
     );
-    lines.push(Line::from(""));
-    append_ranking_section(
-        &mut lines,
-        " top skills (this session) ",
-        &rankings.skills,
-        panel_w,
-        true,
-    );
-    lines
 }
 
-fn ranking_line_count(rankings: &crate::tui::render::StageRankings) -> usize {
-    section_line_count(&rankings.commands) + 1 + section_line_count(&rankings.skills)
-}
-
-fn section_line_count(entries: &[RankedEntry]) -> usize {
-    1 + entries.len().max(1)
-}
-
-fn append_ranking_section(
-    lines: &mut Vec<Line<'static>>,
+fn render_rankings_section(
+    f: &mut Frame,
+    area: Rect,
     title: &str,
     entries: &[RankedEntry],
-    panel_w: usize,
+    scroll_offset: usize,
+    is_active: bool,
     is_skill: bool,
 ) {
-    lines.push(Line::from(Span::styled(title.to_string(), Style::default().fg(dim()))));
-    if entries.is_empty() {
+    if area.height < 2 {
+        return;
+    }
+
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(if is_active {
+            theme().accent_yellow
+        } else {
+            border()
+        }))
+        .title(format!(" {} ", title))
+        .title_style(
+            Style::default()
+                .fg(if is_active {
+                    theme().accent_yellow
+                } else {
+                    theme().text_bright
+                })
+                .add_modifier(if is_active {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+        )
+        .style(Style::default().bg(card_bg()));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if inner.width < 6 || inner.height == 0 {
+        return;
+    }
+
+    let layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Fill(1), Constraint::Length(1)])
+        .split(inner);
+    let content_area = layout[0];
+    let scrollbar_area = layout[1];
+
+    let total = entries.len().max(1);
+    let viewport = content_area.height as usize;
+    let start = scroll_offset.min(total.saturating_sub(viewport));
+    let end = (start + viewport).min(entries.len());
+    let visible = &entries[start..end];
+
+    let position = if entries.is_empty() { 0 } else { start + 1 };
+    let header = Paragraph::new(Line::from(Span::styled(
+        format!(" {}/{} ", position, entries.len()),
+        Style::default().fg(dim()),
+    )))
+    .style(Style::default().bg(card_bg()));
+    if content_area.height > 0 {
+        f.render_widget(
+            header,
+            Rect::new(content_area.x, content_area.y, content_area.width, 1),
+        );
+    }
+
+    let list_area = Rect::new(
+        content_area.x,
+        content_area.y.saturating_add(1),
+        content_area.width,
+        content_area.height.saturating_sub(1),
+    );
+    let mut lines = Vec::new();
+    if visible.is_empty() {
         lines.push(Line::from(Span::styled(
             " no data yet".to_string(),
             Style::default().fg(dim()),
         )));
-        return;
     }
 
     let max_count = entries.first().map(|entry| entry.count).unwrap_or(1).max(1);
-    let name_col = if panel_w > 48 { 24usize } else { 16usize };
+    let name_col = if list_area.width > 48 {
+        22usize
+    } else {
+        14usize
+    };
     let count_col = 4usize;
-    let bar_max = panel_w.saturating_sub(name_col + count_col + 4).max(6);
+    let bar_max = list_area
+        .width
+        .saturating_sub(name_col as u16 + count_col as u16 + 3) as usize;
 
-    for entry in entries {
+    for entry in visible {
         let label = if is_skill {
-            entry.name.rsplit(':').next().unwrap_or(&entry.name).to_string()
+            entry
+                .name
+                .rsplit(':')
+                .next()
+                .unwrap_or(&entry.name)
+                .to_string()
         } else {
             entry.name.clone()
         };
         let truncated = truncate_to_width(&label, name_col.saturating_sub(2));
         let padded_name = format!(" {:<width$}", truncated, width = name_col - 1);
         let ratio = entry.count as f64 / max_count as f64;
-        let filled = (ratio * bar_max as f64).round() as usize;
+        let filled = (ratio * bar_max.max(1) as f64).round() as usize;
         let empty = bar_max.saturating_sub(filled);
         let count_str = format!("{:>3}", entry.count);
         let bar_color = ranking_bar_color(ratio);
         lines.push(Line::from(vec![
             Span::styled(padded_name, Style::default().fg(bar_color)),
             Span::styled("\u{2588}".repeat(filled), Style::default().fg(bar_color)),
-            Span::styled("\u{2591}".repeat(empty), Style::default().fg(theme().hp_empty)),
+            Span::styled(
+                "\u{2591}".repeat(empty),
+                Style::default().fg(theme().hp_empty),
+            ),
             Span::styled(format!(" {}", count_str), Style::default().fg(dim())),
         ]));
     }
+
+    f.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(card_bg())),
+        list_area,
+    );
+
+    render_scrollbar(f, scrollbar_area, start, viewport, entries.len(), is_active);
+}
+
+fn render_scrollbar(
+    f: &mut Frame,
+    area: Rect,
+    start: usize,
+    viewport: usize,
+    total: usize,
+    is_active: bool,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let height = area.height as usize;
+    let thumb_height = if total <= viewport || total == 0 {
+        height.max(1)
+    } else {
+        ((viewport as f64 / total as f64) * height as f64)
+            .ceil()
+            .max(1.0) as usize
+    };
+    let thumb_offset = if total <= viewport || total == 0 {
+        0
+    } else {
+        ((start as f64 / total as f64) * (height.saturating_sub(thumb_height)) as f64).round()
+            as usize
+    };
+
+    let mut lines = Vec::new();
+    for row in 0..height {
+        let in_thumb = row >= thumb_offset && row < thumb_offset + thumb_height;
+        let ch = if in_thumb { "\u{2588}" } else { "\u{2502}" };
+        let color = if in_thumb && is_active {
+            theme().accent_yellow
+        } else if in_thumb {
+            theme().text_bright
+        } else {
+            theme().hp_empty
+        };
+        lines.push(Line::from(Span::styled(
+            ch,
+            Style::default().fg(color).bg(card_bg()),
+        )));
+    }
+    f.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(card_bg())),
+        area,
+    );
 }
 
 fn ranking_bar_color(ratio: f64) -> Color {
@@ -804,24 +1023,56 @@ fn format_elapsed(ts: i64, _snap: &StoreSnapshot, is_latest: bool) -> String {
     let ko = is_korean_locale();
     let is_active = is_latest && diff < 120;
     let text = if is_active && diff < 60 {
-        if ko { format!("{}초", diff) } else { format!("{}s", diff) }
+        if ko {
+            format!("{}초", diff)
+        } else {
+            format!("{}s", diff)
+        }
     } else if is_active {
-        if ko { format!("{}분", diff / 60) } else { format!("{}m", diff / 60) }
+        if ko {
+            format!("{}분", diff / 60)
+        } else {
+            format!("{}m", diff / 60)
+        }
     } else if diff < 60 {
-        if ko { "방금".into() } else { "now".into() }
+        if ko {
+            "방금".into()
+        } else {
+            "now".into()
+        }
     } else if diff < 3600 {
-        if ko { format!("{}분 전", diff / 60) } else { format!("{}m ago", diff / 60) }
+        if ko {
+            format!("{}분 전", diff / 60)
+        } else {
+            format!("{}m ago", diff / 60)
+        }
     } else if diff < 86400 {
-        if ko { format!("{}시간 전", diff / 3600) } else { format!("{}h ago", diff / 3600) }
+        if ko {
+            format!("{}시간 전", diff / 3600)
+        } else {
+            format!("{}h ago", diff / 3600)
+        }
     } else if diff < 2_592_000 {
         let days = diff / 86400;
-        if ko { format!("{}일 전", days) } else { format!("{}d ago", days) }
+        if ko {
+            format!("{}일 전", days)
+        } else {
+            format!("{}d ago", days)
+        }
     } else if diff < 31_536_000 {
         let months = diff / 2_592_000;
-        if ko { format!("{}달 전", months) } else { format!("{}mo ago", months) }
+        if ko {
+            format!("{}달 전", months)
+        } else {
+            format!("{}mo ago", months)
+        }
     } else {
         let years = diff / 31_536_000;
-        if ko { format!("{}년 전", years) } else { format!("{}y ago", years) }
+        if ko {
+            format!("{}년 전", years)
+        } else {
+            format!("{}y ago", years)
+        }
     };
     // Use display width for correct CJK alignment
     let w = display_width(&text);
@@ -853,14 +1104,20 @@ fn wrap_with_tree<'a>(
     tree_cont: &str,
     max_width: usize,
 ) -> Vec<Line<'a>> {
-    let prefix_width: usize = prefix_spans.iter().map(|s| display_width(s.content.as_ref())).sum();
+    let prefix_width: usize = prefix_spans
+        .iter()
+        .map(|s| display_width(s.content.as_ref()))
+        .sum();
     let cont_width = display_width(tree_cont);
     let avail_first = max_width.saturating_sub(prefix_width);
     let avail_cont = max_width.saturating_sub(cont_width);
 
     if avail_first == 0 || avail_cont == 0 {
         let mut spans = prefix_spans;
-        let truncated = truncate_to_width(text, max_width.saturating_sub(prefix_width).saturating_sub(3));
+        let truncated = truncate_to_width(
+            text,
+            max_width.saturating_sub(prefix_width).saturating_sub(3),
+        );
         spans.push(Span::styled(format!("{}...", truncated), text_style));
         return vec![Line::from(spans)];
     }
@@ -1061,7 +1318,10 @@ pub fn party_summary(snap: &StoreSnapshot) -> String {
     }
 
     for agent in &snap.agents {
-        if leader.map(|l| l.agent_id == agent.agent_id).unwrap_or(false) {
+        if leader
+            .map(|l| l.agent_id == agent.agent_id)
+            .unwrap_or(false)
+        {
             continue; // skip leader, already counted
         }
         let is_done = agent.state == AgentState::Completed;
@@ -1091,7 +1351,11 @@ pub fn party_summary(snap: &StoreSnapshot) -> String {
     parts.join(" ")
 }
 
-fn visible_party_window(selected: usize, total: usize, viewport_rows: usize) -> std::ops::Range<usize> {
+fn visible_party_window(
+    selected: usize,
+    total: usize,
+    viewport_rows: usize,
+) -> std::ops::Range<usize> {
     if total == 0 || viewport_rows == 0 {
         return 0..0;
     }
@@ -1116,7 +1380,9 @@ fn party_row_layout(total_width: usize, status: &str) -> (usize, usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{party_row_layout, resolve_pending_focus_select, visible_party_window};
+    use super::{
+        party_row_layout, resolve_pending_focus_select, sidebar_agents, visible_party_window,
+    };
     use crate::protocol::types::{Agent, AgentRole, AgentState, SkillKind};
     use crate::tui::app::App;
     use std::collections::HashMap;
@@ -1126,6 +1392,7 @@ mod tests {
             agent_id: agent_id.to_string(),
             display_name: agent_id.to_string(),
             short_id: agent_id.chars().take(8).collect(),
+            first_seen_ts: 0,
             state: AgentState::Active,
             role,
             current_skill: Some(SkillKind::Bash),
@@ -1139,6 +1406,9 @@ mod tests {
             usage_count: 0,
             tool_run_count: 0,
             last_event_ts: 0,
+            completed_at: None,
+            completed_visible_until: None,
+            completion_recorded: false,
             context_percent: None,
             cost_usd: None,
             model_name: None,
@@ -1177,12 +1447,16 @@ mod tests {
         app.pending_focus_select = true;
         app.sidebar_selected = 1;
         app.focused_agent = None;
-        app.feed_scroll_offset = 9;
+        app.commands_scroll_offset = 9;
+        app.skills_scroll_offset = 4;
+        app.agents_scroll_offset = 2;
 
         resolve_pending_focus_select(&mut app, &[&leader, &scout]);
 
         assert_eq!(app.focused_agent.as_deref(), Some("scout"));
-        assert_eq!(app.feed_scroll_offset, 0);
+        assert_eq!(app.commands_scroll_offset, 0);
+        assert_eq!(app.skills_scroll_offset, 0);
+        assert_eq!(app.agents_scroll_offset, 0);
         assert!(!app.pending_focus_select);
     }
 
@@ -1194,12 +1468,26 @@ mod tests {
         app.pending_focus_select = true;
         app.sidebar_selected = 0;
         app.focused_agent = Some("scout".to_string());
-        app.feed_scroll_offset = 4;
+        app.commands_scroll_offset = 4;
 
         resolve_pending_focus_select(&mut app, &[&leader, &scout]);
 
         assert_eq!(app.focused_agent, None);
-        assert_eq!(app.feed_scroll_offset, 0);
+        assert_eq!(app.commands_scroll_offset, 0);
         assert!(!app.pending_focus_select);
+    }
+
+    #[test]
+    fn sidebar_agents_hide_completed_members_after_visibility_timeout() {
+        let leader = make_agent("lead", AgentRole::Main, None);
+        let mut scout = make_agent("scout", AgentRole::Subagent, Some("lead"));
+        scout.state = AgentState::Completed;
+        scout.completed_visible_until = Some(59);
+
+        let (_, visible_before) = sidebar_agents(&[&leader, &scout], 30).unwrap();
+        let (_, visible_after) = sidebar_agents(&[&leader, &scout], 90).unwrap();
+
+        assert_eq!(visible_before.len(), 1);
+        assert!(visible_after.is_empty());
     }
 }

@@ -1,11 +1,38 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
+use crate::store::analytics::AnalyticsWindow;
+
 // Single view — no tabs needed
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusPane {
     Sidebar,
     MainPanel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RankingsSection {
+    Commands,
+    Skills,
+    Agents,
+}
+
+impl RankingsSection {
+    fn next(self) -> Self {
+        match self {
+            RankingsSection::Commands => RankingsSection::Skills,
+            RankingsSection::Skills => RankingsSection::Agents,
+            RankingsSection::Agents => RankingsSection::Commands,
+        }
+    }
+
+    fn prev(self) -> Self {
+        match self {
+            RankingsSection::Commands => RankingsSection::Agents,
+            RankingsSection::Skills => RankingsSection::Commands,
+            RankingsSection::Agents => RankingsSection::Skills,
+        }
+    }
 }
 
 pub struct App {
@@ -19,12 +46,17 @@ pub struct App {
     // Scroll / selection state
     pub sidebar_selected: usize,
     pub sidebar_count: usize,
-    pub feed_scroll_offset: usize,
-    pub feed_auto_scroll: bool,
+    pub commands_scroll_offset: usize,
+    pub skills_scroll_offset: usize,
+    pub agents_scroll_offset: usize,
+    pub rankings_section: RankingsSection,
+    pub rankings_window: AnalyticsWindow,
 
     // Cached counts for scroll bounds (updated each frame from store snapshot)
     pub agent_count: usize,
-    pub feed_count: usize,
+    pub commands_count: usize,
+    pub skills_count: usize,
+    pub rankings_agents_count: usize,
     pub session_count: usize,
 
     pub port: u16,
@@ -32,8 +64,8 @@ pub struct App {
     pub tick: usize,
 
     // Project selection (cwd-based)
-    pub current_project: Option<String>,  // selected cwd, None = all
-    pub project_index: usize,             // index into project list
+    pub current_project: Option<String>, // selected cwd, None = all
+    pub project_index: usize,            // index into project list
 
     // Agent filter mode: when set, rankings show only this agent's data
     pub focused_agent: Option<String>,
@@ -51,10 +83,15 @@ impl App {
             filter_text: String::new(),
             sidebar_selected: 0,
             sidebar_count: 0,
-            feed_scroll_offset: 0,
-            feed_auto_scroll: false,
+            commands_scroll_offset: 0,
+            skills_scroll_offset: 0,
+            agents_scroll_offset: 0,
+            rankings_section: RankingsSection::Commands,
+            rankings_window: AnalyticsWindow::Hours24,
             agent_count: 0,
-            feed_count: 0,
+            commands_count: 0,
+            skills_count: 0,
+            rankings_agents_count: 0,
             session_count: 0,
             port,
             tick: 0,
@@ -66,12 +103,29 @@ impl App {
     }
 
     /// Called each tick to update cached counts from the store snapshot.
-    pub fn update_counts(&mut self, sidebar_count: usize, feed_count: usize, session_count: usize) {
+    pub fn update_counts(
+        &mut self,
+        sidebar_count: usize,
+        commands_count: usize,
+        skills_count: usize,
+        agents_count: usize,
+        session_count: usize,
+    ) {
         self.sidebar_count = sidebar_count;
         self.agent_count = sidebar_count;
-        self.feed_count = feed_count;
+        self.commands_count = commands_count;
+        self.skills_count = skills_count;
+        self.rankings_agents_count = agents_count;
         self.session_count = session_count;
-        self.feed_scroll_offset = self.feed_scroll_offset.min(feed_count.saturating_sub(1));
+        self.commands_scroll_offset = self
+            .commands_scroll_offset
+            .min(commands_count.saturating_sub(1));
+        self.skills_scroll_offset = self
+            .skills_scroll_offset
+            .min(skills_count.saturating_sub(1));
+        self.agents_scroll_offset = self
+            .agents_scroll_offset
+            .min(agents_count.saturating_sub(1));
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -128,7 +182,7 @@ impl App {
         // Esc exits agent filter first, then normal behavior
         if code == KeyCode::Esc && self.focused_agent.is_some() {
             self.focused_agent = None;
-            self.feed_scroll_offset = 0;
+            self.reset_rankings_scroll();
             return;
         }
 
@@ -144,6 +198,10 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => self.scroll_up(),
             KeyCode::Char('g') => self.scroll_to_top(),
             KeyCode::Char('G') => self.scroll_to_bottom(),
+            KeyCode::Tab => self.advance_main_section(),
+            KeyCode::BackTab => self.rewind_main_section(),
+            KeyCode::Char(',') => self.prev_window(),
+            KeyCode::Char('.') => self.next_window(),
 
             // Enter: in sidebar = filter rankings by selected agent
             KeyCode::Enter => {
@@ -165,7 +223,7 @@ impl App {
             // Esc: exit focus mode or do nothing
             KeyCode::Esc => {
                 self.focused_agent = None;
-                self.feed_scroll_offset = 0;
+                self.reset_rankings_scroll();
             }
 
             _ => {}
@@ -191,9 +249,10 @@ impl App {
                 }
             }
             FocusPane::MainPanel => {
-                let max = self.feed_count.saturating_sub(1);
-                if self.feed_scroll_offset < max {
-                    self.feed_scroll_offset += 1;
+                let max = self.active_section_count().saturating_sub(1);
+                let offset = self.active_section_offset_mut();
+                if *offset < max {
+                    *offset += 1;
                 }
             }
         }
@@ -205,8 +264,9 @@ impl App {
                 self.sidebar_selected = self.sidebar_selected.saturating_sub(1);
             }
             FocusPane::MainPanel => {
-                if self.feed_scroll_offset > 0 {
-                    self.feed_scroll_offset = self.feed_scroll_offset.saturating_sub(1);
+                let offset = self.active_section_offset_mut();
+                if *offset > 0 {
+                    *offset = (*offset).saturating_sub(1);
                 }
             }
         }
@@ -216,7 +276,7 @@ impl App {
         match self.focus {
             FocusPane::Sidebar => self.sidebar_selected = 0,
             FocusPane::MainPanel => {
-                self.feed_scroll_offset = 0;
+                *self.active_section_offset_mut() = 0;
             }
         }
     }
@@ -227,8 +287,52 @@ impl App {
                 self.sidebar_selected = self.sidebar_count.saturating_sub(1);
             }
             FocusPane::MainPanel => {
-                self.feed_scroll_offset = self.feed_count.saturating_sub(1);
+                *self.active_section_offset_mut() = self.active_section_count().saturating_sub(1);
             }
+        }
+    }
+
+    fn advance_main_section(&mut self) {
+        if self.focus == FocusPane::MainPanel {
+            self.rankings_section = self.rankings_section.next();
+        }
+    }
+
+    fn rewind_main_section(&mut self) {
+        if self.focus == FocusPane::MainPanel {
+            self.rankings_section = self.rankings_section.prev();
+        }
+    }
+
+    fn next_window(&mut self) {
+        self.rankings_window = self.rankings_window.next();
+        self.reset_rankings_scroll();
+    }
+
+    fn prev_window(&mut self) {
+        self.rankings_window = self.rankings_window.prev();
+        self.reset_rankings_scroll();
+    }
+
+    fn reset_rankings_scroll(&mut self) {
+        self.commands_scroll_offset = 0;
+        self.skills_scroll_offset = 0;
+        self.agents_scroll_offset = 0;
+    }
+
+    fn active_section_count(&self) -> usize {
+        match self.rankings_section {
+            RankingsSection::Commands => self.commands_count,
+            RankingsSection::Skills => self.skills_count,
+            RankingsSection::Agents => self.rankings_agents_count,
+        }
+    }
+
+    fn active_section_offset_mut(&mut self) -> &mut usize {
+        match self.rankings_section {
+            RankingsSection::Commands => &mut self.commands_scroll_offset,
+            RankingsSection::Skills => &mut self.skills_scroll_offset,
+            RankingsSection::Agents => &mut self.agents_scroll_offset,
         }
     }
 
@@ -268,5 +372,38 @@ impl App {
         } else {
             self.project_index -= 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{App, FocusPane, RankingsSection};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn tab_cycles_rankings_sections() {
+        let mut app = App::new(8080);
+        app.focus = FocusPane::MainPanel;
+
+        app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.rankings_section, RankingsSection::Skills);
+
+        app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.rankings_section, RankingsSection::Agents);
+    }
+
+    #[test]
+    fn comma_and_period_cycle_windows() {
+        let mut app = App::new(8080);
+
+        app.handle_key(key(KeyCode::Char('.')));
+        assert_eq!(app.rankings_window.label(), "7d");
+
+        app.handle_key(key(KeyCode::Char(',')));
+        assert_eq!(app.rankings_window.label(), "24h");
     }
 }

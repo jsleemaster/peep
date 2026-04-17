@@ -60,7 +60,8 @@ pub async fn run_jsonl_watcher(
         }
     }
 
-    // Initial scan: background task reads history for skill counts etc.
+    // Keep the live dashboard behavior: on startup, replay recent history into
+    // the in-memory store without changing the tail offsets used for new events.
     {
         let scan_tx = tx.clone();
         let scan_paths: Vec<PathBuf> = offsets.keys().cloned().collect();
@@ -73,10 +74,7 @@ pub async fn run_jsonl_watcher(
     let mut watcher = RecommendedWatcher::new(
         move |res: notify::Result<Event>| {
             if let Ok(event) = res {
-                let is_relevant = matches!(
-                    event.kind,
-                    EventKind::Create(_) | EventKind::Modify(_)
-                );
+                let is_relevant = matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_));
                 if is_relevant {
                     for path in event.paths {
                         if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
@@ -136,18 +134,15 @@ pub async fn run_jsonl_watcher(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Read recent JSONL files to populate initial state.
-/// For large files (>1MB), only reads the last 1MB to avoid blocking.
-/// Specifically scans for Skill tool_use events for skill counting.
-async fn initial_scan_bg(
-    paths: &[PathBuf],
-    tx: &mpsc::Sender<RawIngestEvent>,
-) {
+/// Read recent JSONL files to populate live startup state.
+/// For large files (>1MB), only reads the last 512KB for recent state while
+/// still scanning the whole file for Skill tool invocations.
+async fn initial_scan_bg(paths: &[PathBuf], tx: &mpsc::Sender<RawIngestEvent>) {
     let cutoff = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-        .saturating_sub(604800);
+        .saturating_sub(7 * 24 * 60 * 60);
 
     for path in paths {
         let modified = std::fs::metadata(path)
@@ -160,7 +155,7 @@ async fn initial_scan_bg(
         }
 
         let file = match std::fs::File::open(path) {
-            Ok(f) => f,
+            Ok(file) => file,
             Err(_) => continue,
         };
 
@@ -168,28 +163,31 @@ async fn initial_scan_bg(
         let reader = BufReader::new(file);
 
         if file_len > 1_048_576 {
-            // Large file: two-pass approach
-            // Pass 1: stream entire file, only JSON-parse Skill lines
             for line in reader.lines().map_while(Result::ok) {
                 if line.contains("\"Skill\"") && line.contains("\"tool_use\"") {
                     if let Some(mut event) = parse_jsonl_line(&line) {
                         event.ai_tool = detect_ai_tool(path);
-                        if tx.send(event).await.is_err() { return; }
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
                     }
                 }
             }
+
             tokio::task::yield_now().await;
-            // Pass 2: re-open file, read last 512KB for recent agent state
-            if let Ok(file2) = std::fs::File::open(path) {
-                let mut reader2 = BufReader::new(file2);
+
+            if let Ok(file) = std::fs::File::open(path) {
+                let mut reader = BufReader::new(file);
                 let seek_pos = file_len.saturating_sub(524_288);
-                let _ = reader2.seek(SeekFrom::Start(seek_pos));
+                let _ = reader.seek(SeekFrom::Start(seek_pos));
                 let mut discard = String::new();
-                let _ = reader2.read_line(&mut discard);
-                for line in reader2.lines().map_while(Result::ok) {
+                let _ = reader.read_line(&mut discard);
+                for line in reader.lines().map_while(Result::ok) {
                     if let Some(mut event) = parse_jsonl_line(&line) {
                         event.ai_tool = detect_ai_tool(path);
-                        if tx.send(event).await.is_err() { return; }
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
                     }
                 }
             }
@@ -197,10 +195,13 @@ async fn initial_scan_bg(
             for line in reader.lines().map_while(Result::ok) {
                 if let Some(mut event) = parse_jsonl_line(&line) {
                     event.ai_tool = detect_ai_tool(path);
-                    if tx.send(event).await.is_err() { return; }
+                    if tx.send(event).await.is_err() {
+                        return;
+                    }
                 }
             }
         }
+
         tokio::task::yield_now().await;
     }
 }
@@ -213,15 +214,12 @@ fn discover_jsonl_files(dir: &PathBuf, offsets: &mut HashMap<PathBuf, u64>) {
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| {
-            e.file_type().is_file()
-                && e.path().extension().map(|x| x == "jsonl").unwrap_or(false)
+            e.file_type().is_file() && e.path().extension().map(|x| x == "jsonl").unwrap_or(false)
         });
 
     for entry in walker {
         let path = entry.path().to_path_buf();
-        let eof = std::fs::metadata(&path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let eof = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         offsets.insert(path, eof);
     }
 }
@@ -234,8 +232,7 @@ fn discover_new_jsonl_files(dir: &PathBuf, offsets: &mut HashMap<PathBuf, u64>) 
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| {
-            e.file_type().is_file()
-                && e.path().extension().map(|x| x == "jsonl").unwrap_or(false)
+            e.file_type().is_file() && e.path().extension().map(|x| x == "jsonl").unwrap_or(false)
         });
 
     for entry in walker {
@@ -289,9 +286,7 @@ async fn drain_file(
                     }
                 } else {
                     let rollback = line.len() as u64;
-                    let new_pos = reader
-                        .stream_position()
-                        .unwrap_or(*offset + rollback);
+                    let new_pos = reader.stream_position().unwrap_or(*offset + rollback);
                     *offset = new_pos - rollback;
                     return;
                 }

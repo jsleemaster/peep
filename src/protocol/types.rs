@@ -114,6 +114,7 @@ pub struct Agent {
     pub agent_id: String,
     pub display_name: String,
     pub short_id: String,
+    pub first_seen_ts: i64,
     pub state: AgentState,
     pub role: AgentRole,
     pub current_skill: Option<SkillKind>,
@@ -127,12 +128,27 @@ pub struct Agent {
     pub usage_count: u64,
     pub tool_run_count: u64,
     pub last_event_ts: i64,
+    pub completed_at: Option<i64>,
+    pub completed_visible_until: Option<i64>,
+    pub completion_recorded: bool,
     pub context_percent: Option<f64>,
     pub cost_usd: Option<f64>,
     pub model_name: Option<String>,
     pub cwd: Option<String>,
     pub ai_tool: Option<String>,
     pub parent_session_id: Option<String>,
+}
+
+impl Agent {
+    pub fn visible_in_party(&self, now: i64) -> bool {
+        match self.state {
+            AgentState::Completed => self
+                .completed_visible_until
+                .map(|visible_until| now <= visible_until)
+                .unwrap_or(false),
+            _ => true,
+        }
+    }
 }
 
 #[allow(dead_code)]

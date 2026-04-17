@@ -22,6 +22,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::Config;
+use crate::store::analytics::AnalyticsStore;
 use crate::store::state::AppStore;
 use crate::tui::app::App;
 use crate::tui::event::{AppEvent, EventHandler};
@@ -160,11 +161,17 @@ async fn main() -> Result<()> {
     // Shared store
     // ----------------------------------------------------------------
     let shared_store = AppStore::new_shared();
+    let shared_analytics = AnalyticsStore::new_shared();
 
     // Pre-populate with mock data when --mock is passed
     if cli.mock {
         let mut store = shared_store.write().await;
         store.populate_mock_data();
+        drop(store);
+        shared_analytics
+            .write()
+            .await
+            .populate_mock_data(Utc::now().timestamp());
     }
 
     // ----------------------------------------------------------------
@@ -198,33 +205,43 @@ async fn main() -> Result<()> {
     // ----------------------------------------------------------------
     // Spawn JSONL watcher
     // ----------------------------------------------------------------
-    if watcher_enabled {
-        let base_dir = watch_dir.unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("/tmp"))
-                .join(".claude")
-                .join("projects")
-        });
+    let watch_base_dir = watch_dir.unwrap_or_else(|| {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join(".claude")
+            .join("projects")
+    });
 
+    if watcher_enabled {
         // Build candidate list (base + any known extra tool dirs that exist).
-        let watch_dirs =
-            collector::jsonl_watcher::candidate_watch_dirs(base_dir.clone());
+        let watch_dirs = collector::jsonl_watcher::candidate_watch_dirs(watch_base_dir.clone());
 
         let any_exists = watch_dirs.iter().any(|d| d.exists());
         if !any_exists {
             eprintln!(
                 "Warning: JSONL watch directory does not exist: {}",
-                base_dir.display()
+                watch_base_dir.display()
             );
             eprintln!("  -> Continuing without JSONL watcher.");
         } else {
+            let analytics_paths =
+                crate::store::analytics::discover_jsonl_paths(watch_base_dir.clone());
+            {
+                let mut analytics = shared_analytics.write().await;
+                analytics.set_warming(true);
+                if let Err(err) = analytics.bootstrap_from_paths(&analytics_paths) {
+                    tracing::warn!("analytics bootstrap failed: {err}");
+                }
+                analytics.set_warming(false);
+            }
+
             // run_jsonl_watcher accepts a single base dir but internally also
             // expands candidate dirs, so pass base_dir — extras are detected inside.
             let tx_jsonl = tx.clone();
             let sd = shutdown.clone();
             tokio::spawn(async move {
                 tokio::select! {
-                    result = collector::jsonl_watcher::run_jsonl_watcher(base_dir, tx_jsonl) => {
+                    result = collector::jsonl_watcher::run_jsonl_watcher(watch_base_dir, tx_jsonl) => {
                         if let Err(e) = result {
                             tracing::warn!("JSONL watcher error: {e}");
                             eprintln!("JSONL watcher error: {e}");
@@ -241,20 +258,50 @@ async fn main() -> Result<()> {
     // ----------------------------------------------------------------
     {
         let store_for_updater = shared_store.clone();
+        let analytics_for_updater = shared_analytics.clone();
         let sd = shutdown.clone();
         tokio::spawn(async move {
-            let mut gc_interval =
-                tokio::time::interval(std::time::Duration::from_secs(10));
+            let mut gc_interval = tokio::time::interval(std::time::Duration::from_secs(10));
             loop {
                 tokio::select! {
                     Some(event) = rx.recv() => {
+                        let agent_id = event.agent_runtime_id.clone();
                         let mut store = store_for_updater.write().await;
-                        store.apply_event(event);
+                        store.apply_event(event.clone());
+                        let agent = store.agents.get(&agent_id).cloned();
+                        drop(store);
+
+                        if let Some(agent) = agent {
+                            let project = agent
+                                .cwd
+                                .as_deref()
+                                .map(crate::protocol::normalize::normalize_project_name);
+                            let mut analytics = analytics_for_updater.write().await;
+                            analytics.ingest_runtime_event(
+                                &event,
+                                &agent.display_name,
+                                project.as_deref(),
+                            );
+                        }
                     }
                     _ = gc_interval.tick() => {
                         let now = Utc::now().timestamp();
                         let mut store = store_for_updater.write().await;
-                        store.gc_stale_agents(now);
+                        let completions = store.gc_stale_agents(now);
+                        drop(store);
+
+                        let mut analytics = analytics_for_updater.write().await;
+                        for completion in completions {
+                            analytics.record_completion(
+                                &completion.agent_id,
+                                &completion.display_name,
+                                completion.project.as_deref(),
+                                completion.completed_at,
+                            );
+                        }
+                        if let Err(err) = analytics.save_if_dirty() {
+                            tracing::warn!("analytics save failed: {err}");
+                        }
                     }
                     _ = sd.cancelled() => break,
                 }
@@ -281,15 +328,25 @@ async fn main() -> Result<()> {
     let event_handler = EventHandler::new(tick_rate);
 
     while app.running {
-        let snap = StoreSnapshot::from_store(&shared_store).await;
+        let snap = StoreSnapshot::from_stores(
+            &shared_store,
+            &shared_analytics,
+            app.current_project.as_deref(),
+            app.focused_agent.as_deref(),
+            app.rankings_window,
+        )
+        .await;
         let sidebar_count =
             crate::tui::widgets::stage::sidebar_item_count(&snap, &app.current_project);
-        let main_panel_count = crate::tui::widgets::stage::main_panel_item_count(
-            &snap,
-            &app.current_project,
-            &app.focused_agent,
+        let (commands_count, skills_count, agents_count) =
+            crate::tui::widgets::stage::main_panel_item_counts(&snap);
+        app.update_counts(
+            sidebar_count,
+            commands_count,
+            skills_count,
+            agents_count,
+            snap.sessions.len(),
         );
-        app.update_counts(sidebar_count, main_panel_count, snap.sessions.len());
         terminal.draw(|f| render::draw(f, &mut app, &snap))?;
 
         match event_handler.next()? {

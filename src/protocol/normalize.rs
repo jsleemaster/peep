@@ -44,6 +44,33 @@ pub fn extract_ranked_command(tool_name: Option<&str>, detail: Option<&str>) -> 
     }
 }
 
+pub fn normalize_project_name(cwd: &str) -> String {
+    let parts: Vec<&str> = cwd.split('/').collect();
+    for (i, part) in parts.iter().enumerate() {
+        if (*part == "services" || *part == "app") && i + 1 < parts.len() {
+            return parts[i + 1].to_string();
+        }
+    }
+
+    let skip = [
+        "src",
+        "shared",
+        "assets",
+        "images",
+        "ui",
+        "components",
+        ".claude",
+        "mcp",
+    ];
+    for part in parts.iter().rev() {
+        if !part.is_empty() && !skip.contains(part) {
+            return part.to_string();
+        }
+    }
+
+    cwd.rsplit('/').next().unwrap_or(cwd).to_string()
+}
+
 pub fn normalize_ranked_command(input: &str) -> Option<String> {
     let mut tokens = input.split_whitespace().peekable();
     while let Some(token) = tokens.peek().copied() {
@@ -97,11 +124,7 @@ fn is_env_assignment(token: &str) -> bool {
     let Some((lhs, rhs)) = token.split_once('=') else {
         return false;
     };
-    !lhs.is_empty()
-        && !rhs.is_empty()
-        && lhs
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    !lhs.is_empty() && !rhs.is_empty() && lhs.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn is_shell_control(token: &str) -> bool {

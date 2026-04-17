@@ -21,7 +21,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::store::state::AppStore;
 use crate::tui::app::{App, FocusPane};
-use crate::tui::render::{self, StoreSnapshot};
+use crate::tui::render::{self, RankedEntry, StageRankings, StoreSnapshot};
 
 const TERMINAL_COLS: u16 = 140;
 const TERMINAL_ROWS: u16 = 40;
@@ -49,8 +49,7 @@ fn main() -> Result<()> {
         let output = args
             .output_dir
             .join(format!("{}-{}.svg", scenario.slug(), args.theme));
-        fs::write(&output, svg)
-            .with_context(|| format!("failed to write {}", output.display()))?;
+        fs::write(&output, svg).with_context(|| format!("failed to write {}", output.display()))?;
         println!("{}", output.display());
     }
 
@@ -132,7 +131,13 @@ fn render_scenario_svg(scenario: Scenario) -> Result<String> {
     let snap = snapshot_from_store(&store);
     let mut app = App::new(3100);
     app.tick = 2400;
-    app.update_counts(snap.agents.len(), snap.feed.len(), snap.sessions.len());
+    app.update_counts(
+        snap.agents.len(),
+        snap.rankings.commands.len(),
+        snap.rankings.skills.len(),
+        snap.rankings.agents.len(),
+        snap.sessions.len(),
+    );
 
     let projects = tui::widgets::stage::get_projects(&snap);
     match scenario {
@@ -157,11 +162,23 @@ fn render_scenario_svg(scenario: Scenario) -> Result<String> {
     terminal.draw(|frame| render::draw(frame, &mut app, &snap))?;
 
     let buffer = terminal.backend().buffer();
-    Ok(buffer_to_svg(buffer, scenario.window_title(), current_colors()))
+    Ok(buffer_to_svg(
+        buffer,
+        scenario.window_title(),
+        current_colors(),
+    ))
 }
 
 fn snapshot_from_store(store: &AppStore) -> StoreSnapshot {
     let now = Utc::now().timestamp();
+    let mut analytics = crate::store::analytics::AnalyticsStore::default();
+    analytics.populate_mock_data(now);
+    let view = analytics.query(crate::store::analytics::AnalyticsQuery::new(
+        crate::store::analytics::AnalyticsWindow::Hours24,
+        Some("platform"),
+        None,
+        now,
+    ));
     StoreSnapshot {
         agents: store.sorted_agents().into_iter().cloned().collect(),
         feed: store.feed.iter().cloned().collect(),
@@ -169,6 +186,27 @@ fn snapshot_from_store(store: &AppStore) -> StoreSnapshot {
         sparkline: store.velocity_sparkline_data(15, now),
         metrics: store.derived_metrics(now),
         available_skills: store.available_skills.clone(),
+        rankings: StageRankings {
+            window: view.summary.window,
+            agents_used: view.summary.agents_used,
+            completed: view.summary.completed,
+            commands: view
+                .commands
+                .into_iter()
+                .map(|entry| RankedEntry::new(entry.name, entry.count, entry.last_seen))
+                .collect(),
+            skills: view
+                .skills
+                .into_iter()
+                .map(|entry| RankedEntry::new(entry.name, entry.count, entry.last_seen))
+                .collect(),
+            agents: view
+                .agents
+                .into_iter()
+                .map(|entry| RankedEntry::new(entry.name, entry.count, entry.last_seen))
+                .collect(),
+            warming: false,
+        },
     }
 }
 
@@ -300,8 +338,16 @@ fn buffer_to_svg(buffer: &Buffer, title: &str, colors: ThemeColors) -> String {
                 continue;
             }
             let fg = css_color(cell.fg, colors.fg);
-            let opacity = if cell.modifier.contains(Modifier::DIM) { 0.78 } else { 1.0 };
-            let font_weight = if cell.modifier.contains(Modifier::BOLD) { "700" } else { "500" };
+            let opacity = if cell.modifier.contains(Modifier::DIM) {
+                0.78
+            } else {
+                1.0
+            };
+            let font_weight = if cell.modifier.contains(Modifier::BOLD) {
+                "700"
+            } else {
+                "500"
+            };
             let text_x = screen_x + x as f32 * CELL_WIDTH + 0.8;
             let text_y = screen_y + y as f32 * CELL_HEIGHT + (CELL_HEIGHT * 0.79);
             svg.push_str(&format!(
@@ -341,10 +387,8 @@ fn css_color(color: Color, fallback: Color) -> String {
 
 fn indexed_color(idx: u8) -> String {
     const COLORS: [&str; 16] = [
-        "#000000", "#800000", "#008000", "#808000",
-        "#000080", "#800080", "#008080", "#c0c0c0",
-        "#808080", "#ff0000", "#00ff00", "#ffff00",
-        "#0000ff", "#ff00ff", "#00ffff", "#ffffff",
+        "#000000", "#800000", "#008000", "#808000", "#000080", "#800080", "#008080", "#c0c0c0",
+        "#808080", "#ff0000", "#00ff00", "#ffff00", "#0000ff", "#ff00ff", "#00ffff", "#ffffff",
     ];
     COLORS
         .get(idx as usize)

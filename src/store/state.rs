@@ -4,6 +4,7 @@ use tokio::sync::RwLock;
 
 use crate::protocol::normalize::{extract_ranked_command, tool_name_to_skill};
 use crate::protocol::types::*;
+use crate::store::analytics::CompletedAgentRecord;
 
 use chrono::Utc;
 
@@ -64,13 +65,15 @@ impl AppStore {
                 Some("AgentSpawn") | Some("Subagent")
             );
             let display_name = if is_sub {
-                raw.detail.as_deref()
+                raw.detail
+                    .as_deref()
                     .and_then(|d| d.split(" | ").next())
                     .or(raw.slug.as_deref())
                     .unwrap_or(&short_id)
                     .to_string()
             } else {
-                raw.slug.clone()
+                raw.slug
+                    .clone()
                     .or_else(|| raw.session_runtime_id.clone())
                     .unwrap_or_else(|| short_id.clone())
             };
@@ -78,6 +81,7 @@ impl AppStore {
                 agent_id: agent_id.clone(),
                 display_name,
                 short_id: short_id.clone(),
+                first_seen_ts: raw.ts,
                 state: new_state,
                 role: if is_sub {
                     AgentRole::Subagent
@@ -95,6 +99,9 @@ impl AppStore {
                 usage_count: 0,
                 tool_run_count: 0,
                 last_event_ts: raw.ts,
+                completed_at: None,
+                completed_visible_until: None,
+                completion_recorded: false,
                 context_percent: None,
                 cost_usd: None,
                 model_name: None,
@@ -103,6 +110,12 @@ impl AppStore {
                 parent_session_id: raw.session_runtime_id.clone(),
             }
         });
+
+        if agent.state == AgentState::Completed && raw.ts > agent.last_event_ts {
+            agent.completed_at = None;
+            agent.completed_visible_until = None;
+            agent.completion_recorded = false;
+        }
 
         agent.state = new_state;
         agent.last_event_ts = raw.ts;
@@ -134,7 +147,10 @@ impl AppStore {
         if raw.tool_name.as_deref() == Some("Skill") {
             if let Some(ref detail) = raw.detail {
                 let skill_name = detail.split_whitespace().next().unwrap_or(detail);
-                *agent.skills_invoked.entry(skill_name.to_string()).or_insert(0) += 1;
+                *agent
+                    .skills_invoked
+                    .entry(skill_name.to_string())
+                    .or_insert(0) += 1;
                 agent.skill_last_seen.insert(skill_name.to_string(), raw.ts);
                 tracing::debug!("Skill tracked: {} for agent {}", skill_name, agent_id);
             }
@@ -189,14 +205,30 @@ impl AppStore {
     }
 
     /// Mark agents with no events for STALE_AGENT_MS as Completed.
-    pub fn gc_stale_agents(&mut self, now: i64) {
+    pub fn gc_stale_agents(&mut self, now: i64) -> Vec<CompletedAgentRecord> {
         let stale_threshold = now - (STALE_AGENT_MS / 1000);
+        let mut completions = Vec::new();
         for agent in self.agents.values_mut() {
             if agent.state != AgentState::Completed && agent.last_event_ts < stale_threshold {
                 agent.state = AgentState::Completed;
                 agent.current_skill = None;
+                agent.completed_at = Some(agent.last_event_ts);
+                agent.completed_visible_until = Some(now + 60);
+                if !agent.completion_recorded {
+                    completions.push(CompletedAgentRecord {
+                        agent_id: agent.agent_id.clone(),
+                        display_name: agent.display_name.clone(),
+                        project: agent
+                            .cwd
+                            .as_deref()
+                            .map(crate::protocol::normalize::normalize_project_name),
+                        completed_at: agent.last_event_ts,
+                    });
+                    agent.completion_recorded = true;
+                }
             }
         }
+        completions
     }
 
     /// Count events in the last 60 seconds.
@@ -326,21 +358,26 @@ impl AppStore {
 
         for (id, name, state, role, ctx, cwd, ai_tool, model_name) in agents_raw {
             let mut skill_usage = HashMap::new();
-            skill_usage.insert(SkillKind::Read,   12u64);
-            skill_usage.insert(SkillKind::Edit,    5);
-            skill_usage.insert(SkillKind::Bash,    8);
-            skill_usage.insert(SkillKind::Search,  3);
+            skill_usage.insert(SkillKind::Read, 12u64);
+            skill_usage.insert(SkillKind::Edit, 5);
+            skill_usage.insert(SkillKind::Bash, 8);
+            skill_usage.insert(SkillKind::Search, 3);
 
             self.agents.insert(
                 id.to_string(),
                 Agent {
-                    agent_id:      id.to_string(),
-                    display_name:  name.to_string(),
-                    short_id:      id[..8].to_string(),
-                    state:         *state,
-                    role:          *role,
-                    current_skill: if *state == AgentState::Active { Some(SkillKind::Edit) } else { None },
-                    branch_name:   Some(format!("feat/{name}")),
+                    agent_id: id.to_string(),
+                    display_name: name.to_string(),
+                    short_id: id[..8].to_string(),
+                    first_seen_ts: now - 600,
+                    state: *state,
+                    role: *role,
+                    current_skill: if *state == AgentState::Active {
+                        Some(SkillKind::Edit)
+                    } else {
+                        None
+                    },
+                    branch_name: Some(format!("feat/{name}")),
                     skill_usage,
                     skills_invoked: HashMap::from([
                         ("superpowers:brainstorming".to_string(), 2),
@@ -358,15 +395,26 @@ impl AppStore {
                         ("git diff".to_string(), now - 18),
                         ("cargo test".to_string(), now - 10),
                     ]),
-                    total_tokens:  42_000,
-                    usage_count:   28,
+                    total_tokens: 42_000,
+                    usage_count: 28,
                     tool_run_count: 28,
                     last_event_ts: now - 30,
+                    completed_at: if *state == AgentState::Completed {
+                        Some(now - 30)
+                    } else {
+                        None
+                    },
+                    completed_visible_until: if *state == AgentState::Completed {
+                        Some(now + 30)
+                    } else {
+                        None
+                    },
+                    completion_recorded: *state == AgentState::Completed,
                     context_percent: *ctx,
-                    cost_usd:      Some(0.12),
-                    model_name:    Some((*model_name).to_string()),
-                    cwd:           Some(cwd.to_string()),
-                    ai_tool:       Some((*ai_tool).to_string()),
+                    cost_usd: Some(0.12),
+                    model_name: Some((*model_name).to_string()),
+                    cwd: Some(cwd.to_string()),
+                    ai_tool: Some((*ai_tool).to_string()),
                     parent_session_id: None,
                 },
             );
@@ -376,26 +424,126 @@ impl AppStore {
         // Feed events (~20)
         // ----------------------------------------------------------------
         let feed_entries: &[(&str, RuntimeEventType, Option<&str>, Option<&str>)] = &[
-            ("main-worker-0001abcd",  RuntimeEventType::ToolStart,    Some("Read"),  Some("src/main.rs")),
-            ("main-worker-0001abcd",  RuntimeEventType::ToolDone,     Some("Read"),  Some("src/main.rs")),
-            ("team-review-0002efgh",  RuntimeEventType::TurnActive,   None,          None),
-            ("main-worker-0001abcd",  RuntimeEventType::ToolStart,    Some("Edit"),  Some("src/store/state.rs")),
-            ("sub-scout-0003ijkl",    RuntimeEventType::ToolStart,    Some("Bash"),  Some("cargo build")),
-            ("team-builder-0004mnop", RuntimeEventType::TurnActive,   None,          None),
-            ("main-worker-0001abcd",  RuntimeEventType::ToolDone,     Some("Edit"),  Some("src/store/state.rs")),
-            ("team-review-0002efgh",  RuntimeEventType::PermissionWait, None,        Some("waiting for user")),
-            ("sub-scout-0003ijkl",    RuntimeEventType::ToolDone,     Some("Bash"),  None),
-            ("team-builder-0004mnop", RuntimeEventType::ToolStart,    Some("Search"), Some("Cargo.toml")),
-            ("main-worker-0001abcd",  RuntimeEventType::AssistantText, None,         None),
-            ("team-builder-0004mnop", RuntimeEventType::ToolDone,     Some("Search"), None),
-            ("sub-scout-0003ijkl",    RuntimeEventType::TurnWaiting,  None,          None),
-            ("main-worker-0001abcd",  RuntimeEventType::ToolStart,    Some("Bash"),  Some("cargo clippy")),
-            ("team-review-0002efgh",  RuntimeEventType::AssistantText, None,         None),
-            ("main-worker-0001abcd",  RuntimeEventType::ToolDone,     Some("Bash"),  None),
-            ("team-builder-0004mnop", RuntimeEventType::ToolStart,    Some("Read"),  Some("README.md")),
-            ("main-worker-0001abcd",  RuntimeEventType::ToolStart,    Some("Write"), Some("src/config.rs")),
-            ("team-builder-0004mnop", RuntimeEventType::ToolDone,     Some("Read"),  None),
-            ("main-worker-0001abcd",  RuntimeEventType::ToolDone,     Some("Write"), None),
+            (
+                "main-worker-0001abcd",
+                RuntimeEventType::ToolStart,
+                Some("Read"),
+                Some("src/main.rs"),
+            ),
+            (
+                "main-worker-0001abcd",
+                RuntimeEventType::ToolDone,
+                Some("Read"),
+                Some("src/main.rs"),
+            ),
+            (
+                "team-review-0002efgh",
+                RuntimeEventType::TurnActive,
+                None,
+                None,
+            ),
+            (
+                "main-worker-0001abcd",
+                RuntimeEventType::ToolStart,
+                Some("Edit"),
+                Some("src/store/state.rs"),
+            ),
+            (
+                "sub-scout-0003ijkl",
+                RuntimeEventType::ToolStart,
+                Some("Bash"),
+                Some("cargo build"),
+            ),
+            (
+                "team-builder-0004mnop",
+                RuntimeEventType::TurnActive,
+                None,
+                None,
+            ),
+            (
+                "main-worker-0001abcd",
+                RuntimeEventType::ToolDone,
+                Some("Edit"),
+                Some("src/store/state.rs"),
+            ),
+            (
+                "team-review-0002efgh",
+                RuntimeEventType::PermissionWait,
+                None,
+                Some("waiting for user"),
+            ),
+            (
+                "sub-scout-0003ijkl",
+                RuntimeEventType::ToolDone,
+                Some("Bash"),
+                None,
+            ),
+            (
+                "team-builder-0004mnop",
+                RuntimeEventType::ToolStart,
+                Some("Search"),
+                Some("Cargo.toml"),
+            ),
+            (
+                "main-worker-0001abcd",
+                RuntimeEventType::AssistantText,
+                None,
+                None,
+            ),
+            (
+                "team-builder-0004mnop",
+                RuntimeEventType::ToolDone,
+                Some("Search"),
+                None,
+            ),
+            (
+                "sub-scout-0003ijkl",
+                RuntimeEventType::TurnWaiting,
+                None,
+                None,
+            ),
+            (
+                "main-worker-0001abcd",
+                RuntimeEventType::ToolStart,
+                Some("Bash"),
+                Some("cargo clippy"),
+            ),
+            (
+                "team-review-0002efgh",
+                RuntimeEventType::AssistantText,
+                None,
+                None,
+            ),
+            (
+                "main-worker-0001abcd",
+                RuntimeEventType::ToolDone,
+                Some("Bash"),
+                None,
+            ),
+            (
+                "team-builder-0004mnop",
+                RuntimeEventType::ToolStart,
+                Some("Read"),
+                Some("README.md"),
+            ),
+            (
+                "main-worker-0001abcd",
+                RuntimeEventType::ToolStart,
+                Some("Write"),
+                Some("src/config.rs"),
+            ),
+            (
+                "team-builder-0004mnop",
+                RuntimeEventType::ToolDone,
+                Some("Read"),
+                None,
+            ),
+            (
+                "main-worker-0001abcd",
+                RuntimeEventType::ToolDone,
+                Some("Write"),
+                None,
+            ),
         ];
 
         for (i, (agent_id, event_type, tool_name, file_path)) in feed_entries.iter().enumerate() {
@@ -407,10 +555,7 @@ impl AppStore {
                 .map(|a| (a.display_name.clone(), a.short_id.clone()))
                 .unwrap_or_else(|| (agent_id[..8].to_string(), agent_id[..8].to_string()));
 
-            let ai_tool = self
-                .agents
-                .get(*agent_id)
-                .and_then(|a| a.ai_tool.clone());
+            let ai_tool = self.agents.get(*agent_id).and_then(|a| a.ai_tool.clone());
 
             let ev = FeedEvent {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -435,24 +580,24 @@ impl AppStore {
         // Completed sessions (3)
         // ----------------------------------------------------------------
         let sessions_raw: &[(&str, AgentRole, u64, u64)] = &[
-            ("session-alpha",   AgentRole::Main,     3_600_000, 84_000),
-            ("session-beta",    AgentRole::Team,     1_200_000, 31_000),
-            ("session-gamma",   AgentRole::Subagent,   900_000, 18_500),
+            ("session-alpha", AgentRole::Main, 3_600_000, 84_000),
+            ("session-beta", AgentRole::Team, 1_200_000, 31_000),
+            ("session-gamma", AgentRole::Subagent, 900_000, 18_500),
         ];
 
         for (session_id, role, duration_ms, tokens) in sessions_raw {
             self.sessions.push(Session {
-                session_id:    session_id.to_string(),
-                display_name:  session_id.to_string(),
-                role:          *role,
-                started_at:    now - (*duration_ms as i64 / 1000) - 600,
-                ended_at:      now - 600,
-                duration_ms:   *duration_ms,
-                event_count:   55,
+                session_id: session_id.to_string(),
+                display_name: session_id.to_string(),
+                role: *role,
+                started_at: now - (*duration_ms as i64 / 1000) - 600,
+                ended_at: now - 600,
+                duration_ms: *duration_ms,
+                event_count: 55,
                 tool_run_count: 42,
-                total_tokens:  *tokens,
-                cost_usd:      Some(0.08),
-                close_reason:  SessionCloseReason::WorkFinished,
+                total_tokens: *tokens,
+                cost_usd: Some(0.08),
+                close_reason: SessionCloseReason::WorkFinished,
             });
         }
 
@@ -532,7 +677,12 @@ mod tests {
     use super::AppStore;
     use crate::protocol::types::{IngestSource, RawIngestEvent, RuntimeEventType};
 
-    fn raw_event(agent_id: &str, ts: i64, tool_name: Option<&str>, detail: Option<&str>) -> RawIngestEvent {
+    fn raw_event(
+        agent_id: &str,
+        ts: i64,
+        tool_name: Option<&str>,
+        detail: Option<&str>,
+    ) -> RawIngestEvent {
         RawIngestEvent {
             source: IngestSource::Jsonl,
             agent_runtime_id: agent_id.to_string(),
@@ -556,9 +706,24 @@ mod tests {
     fn apply_event_tracks_normalized_commands() {
         let mut store = AppStore::new();
 
-        store.apply_event(raw_event("agent-a", 10, Some("Bash"), Some("git diff src/main.rs")));
-        store.apply_event(raw_event("agent-a", 20, Some("Bash"), Some("git diff --stat")));
-        store.apply_event(raw_event("agent-a", 30, Some("Bash"), Some("cargo test render::tests")));
+        store.apply_event(raw_event(
+            "agent-a",
+            10,
+            Some("Bash"),
+            Some("git diff src/main.rs"),
+        ));
+        store.apply_event(raw_event(
+            "agent-a",
+            20,
+            Some("Bash"),
+            Some("git diff --stat"),
+        ));
+        store.apply_event(raw_event(
+            "agent-a",
+            30,
+            Some("Bash"),
+            Some("cargo test render::tests"),
+        ));
 
         let agent = store.agents.get("agent-a").unwrap();
         assert_eq!(agent.command_usage.get("git diff"), Some(&2));
@@ -570,11 +735,44 @@ mod tests {
     fn apply_event_tracks_skill_last_seen() {
         let mut store = AppStore::new();
 
-        store.apply_event(raw_event("agent-a", 10, Some("Skill"), Some("superpowers:brainstorming scope the work")));
-        store.apply_event(raw_event("agent-a", 25, Some("Skill"), Some("superpowers:brainstorming revise the spec")));
+        store.apply_event(raw_event(
+            "agent-a",
+            10,
+            Some("Skill"),
+            Some("superpowers:brainstorming scope the work"),
+        ));
+        store.apply_event(raw_event(
+            "agent-a",
+            25,
+            Some("Skill"),
+            Some("superpowers:brainstorming revise the spec"),
+        ));
 
         let agent = store.agents.get("agent-a").unwrap();
-        assert_eq!(agent.skills_invoked.get("superpowers:brainstorming"), Some(&2));
-        assert_eq!(agent.skill_last_seen.get("superpowers:brainstorming"), Some(&25));
+        assert_eq!(
+            agent.skills_invoked.get("superpowers:brainstorming"),
+            Some(&2)
+        );
+        assert_eq!(
+            agent.skill_last_seen.get("superpowers:brainstorming"),
+            Some(&25)
+        );
+    }
+
+    #[test]
+    fn gc_stale_agents_marks_completion_once_and_sets_visibility_ttl() {
+        let mut store = AppStore::new();
+        store.apply_event(raw_event("agent-a", 10, Some("Bash"), Some("git diff")));
+
+        let completions = store.gc_stale_agents(400);
+        let agent = store.agents.get("agent-a").unwrap();
+
+        assert_eq!(completions.len(), 1);
+        assert_eq!(agent.completed_at, Some(10));
+        assert_eq!(agent.completed_visible_until, Some(460));
+        assert!(agent.completion_recorded);
+
+        let completions_again = store.gc_stale_agents(500);
+        assert!(completions_again.is_empty());
     }
 }
