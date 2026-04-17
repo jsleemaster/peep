@@ -1,5 +1,5 @@
 pub mod chicken;
-pub mod leader {}
-pub mod party {}
-pub mod style;
+pub mod leader;
+pub mod party;
 pub mod renderer;
+pub mod style;
