@@ -12,8 +12,8 @@ use crate::protocol::types::{AgentRole, AgentState, FeedEvent};
 use crate::store::state::AppStore;
 use crate::tui::app::{App, RankingsSection};
 use crate::tui::render::{RankedEntry, StoreSnapshot};
-use crate::tui::sprites::chicken;
-use crate::tui::sprites::renderer::{sprite_to_lines, sprite_to_lines_compact};
+use crate::tui::sprites::renderer::{render_sprite, RenderOptions, RenderProfile};
+use crate::tui::sprites::{chicken, leader, party};
 use crate::tui::theme::theme;
 
 fn bg() -> Color {
@@ -216,23 +216,30 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
         area,
     );
 
-    // Animated chicken sprite (alternates idle/peck)
-    let chicken_pixels = if (tick / 600).is_multiple_of(2) {
-        chicken::chicken_idle(tick / 150)
+    // Animated leader sprite (alternates idle/peck)
+    let leader_pixels = if (tick / 600).is_multiple_of(2) {
+        leader::leader_idle(tick / 150)
     } else {
-        chicken::chicken_peck(tick / 150)
+        leader::leader_peck(tick / 150)
     };
-    let chicken_lines = sprite_to_lines(&chicken_pixels, card_bg());
+    let leader_lines = render_sprite(
+        &leader_pixels,
+        card_bg(),
+        RenderOptions {
+            profile: leader_render_profile(area.width),
+            compact: false,
+        },
+    );
 
     // Center everything
-    let content_height = chicken_lines.len() as u16 + 10; // sprite + text
+    let content_height = leader_lines.len() as u16 + 10; // sprite + text
     let start_y = area.y + area.height.saturating_sub(content_height) / 2;
     let center_x = area.x + area.width / 2;
 
     // Draw chicken centered
     let sprite_w = 28u16.min(area.width); // 14px * 2
     let sprite_x = center_x.saturating_sub(sprite_w / 2);
-    for (j, line) in chicken_lines.iter().enumerate() {
+    for (j, line) in leader_lines.iter().enumerate() {
         let y = start_y + j as u16;
         if y < area.y + area.height {
             f.render_widget(
@@ -242,7 +249,7 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
         }
     }
 
-    let text_y = start_y + chicken_lines.len() as u16 + 1;
+    let text_y = start_y + leader_lines.len() as u16 + 1;
     let t = theme();
 
     // Title
@@ -324,18 +331,18 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     let (proj_agents, _proj_feed) = filter_snap_by_project(snap, &app.current_project);
 
     // Find the leader (AgentRole::Main or first agent)
-    let (leader, party_members) = match sidebar_agents(&proj_agents, chrono::Utc::now().timestamp())
-    {
-        Some(data) => data,
-        None => return,
-    };
+    let (lead_agent, party_members) =
+        match sidebar_agents(&proj_agents, chrono::Utc::now().timestamp()) {
+            Some(data) => data,
+            None => return,
+        };
 
     let mut y = li.y;
 
     // Leader name + badge
     let name_line = Line::from(vec![
         Span::styled(
-            format!(" {} ", leader.display_name),
+            format!(" {} ", lead_agent.display_name),
             Style::default()
                 .fg(theme().lead_name)
                 .add_modifier(Modifier::BOLD),
@@ -354,18 +361,26 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     );
     y += 2; // padding after name
 
-    // Chicken sprite (leader is always a chicken)
+    // Leader sprite
     let tick = app.tick;
-    let is_active = leader.state == AgentState::Active;
-    let chicken_pixels = if is_active {
-        chicken::chicken_peck(tick / 4)
+    let is_active = lead_agent.state == AgentState::Active;
+    let leader_pixels = if is_active {
+        leader::leader_peck(tick / 4)
     } else {
-        chicken::chicken_idle(tick / 4)
+        leader::leader_idle(tick / 4)
     };
-    let chicken_lines = sprite_to_lines_compact(&chicken_pixels, card_bg());
+    let leader_profile = leader_render_profile(li.width);
+    let leader_lines = render_sprite(
+        &leader_pixels,
+        card_bg(),
+        RenderOptions {
+            profile: leader_profile,
+            compact: leader_profile == RenderProfile::Safe,
+        },
+    );
     let cw = 14u16.min(li.width);
     let cx = li.x + (li.width.saturating_sub(cw)) / 2;
-    for (j, line) in chicken_lines.iter().enumerate() {
+    for (j, line) in leader_lines.iter().enumerate() {
         let sy = y + j as u16;
         if sy < li.y + li.height {
             f.render_widget(
@@ -374,14 +389,14 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             );
         }
     }
-    y += chicken_lines.len() as u16; // padding after chicken
+    y += leader_lines.len() as u16; // padding after chicken
 
     // Leader stats: HP bar (100% = full health, decreases as context fills up)
     if y < li.y + li.height {
-        let used_pct = leader.context_percent.unwrap_or_else(|| {
+        let used_pct = lead_agent.context_percent.unwrap_or_else(|| {
             // Estimate from tokens: assume 1M context window
-            if leader.total_tokens > 0 {
-                ((leader.total_tokens as f64 / 1_000_000.0) * 100.0).min(100.0)
+            if lead_agent.total_tokens > 0 {
+                ((lead_agent.total_tokens as f64 / 1_000_000.0) * 100.0).min(100.0)
             } else {
                 0.0
             }
@@ -398,8 +413,8 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             t.hp_good
         };
 
-        let tokens_str = AppStore::format_tokens(leader.total_tokens);
-        let cost_str = leader
+        let tokens_str = AppStore::format_tokens(lead_agent.total_tokens);
+        let cost_str = lead_agent
             .cost_usd
             .map(|c| format!("${:.2}", c))
             .unwrap_or_else(|| "-".into());
@@ -550,19 +565,27 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
 
             let is_done = member.state == AgentState::Completed;
             let is_waiting = member.state == AgentState::Waiting;
-            let stage = chicken::agent_growth_stage(member.usage_count, is_done);
+            let stage = party::growth_stage(member.usage_count, is_done);
 
             let sprite = match stage {
-                "egg" => chicken::egg_sprite(),
-                "hatching" => chicken::egg_cracking(tick / 3),
-                "peeking" => chicken::egg_hatching_chick(tick / 3),
-                "chick" if is_waiting => chicken::chick_sleeping(tick),
-                "chick" => chicken::chick_sprite(tick / 3),
-                "done" => chicken::chick_done(),
-                _ => chicken::egg_sprite(),
+                "egg" => party::party_egg(),
+                "hatching" => party::party_hatching(tick / 3),
+                "peeking" => party::party_peeking(tick / 3),
+                "chick" if is_waiting => party::party_sleeping(tick),
+                "chick" => party::party_walking(tick / 3),
+                "done" => party::party_done(),
+                _ => party::party_egg(),
             };
 
-            let spr_lines = sprite_to_lines_compact(&sprite, card_bg());
+            let profile = party_render_profile(use_compact, col_w);
+            let spr_lines = render_sprite(
+                &sprite,
+                card_bg(),
+                RenderOptions {
+                    profile,
+                    compact: true,
+                },
+            );
             let spr_w = if stage == "egg" || stage == "hatching" {
                 6u16
             } else {
@@ -1378,10 +1401,27 @@ fn party_row_layout(total_width: usize, status: &str) -> (usize, usize) {
     (name_width, status_width)
 }
 
+fn leader_render_profile(width: u16) -> RenderProfile {
+    if width < 14 {
+        RenderProfile::Safe
+    } else {
+        RenderProfile::Expressive
+    }
+}
+
+fn party_render_profile(use_compact: bool, col_w: u16) -> RenderProfile {
+    if use_compact || col_w < 8 {
+        RenderProfile::Safe
+    } else {
+        RenderProfile::Expressive
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        party_row_layout, resolve_pending_focus_select, sidebar_agents, visible_party_window,
+        leader_render_profile, party_render_profile, party_row_layout,
+        resolve_pending_focus_select, sidebar_agents, visible_party_window,
     };
     use crate::protocol::types::{Agent, AgentRole, AgentState, SkillKind};
     use crate::tui::app::App;
@@ -1437,6 +1477,30 @@ mod tests {
     fn party_row_layout_reserves_a_fixed_status_column() {
         assert_eq!(party_row_layout(40, "done"), (31, 6));
         assert_eq!(party_row_layout(40, "very-long-status"), (25, 12));
+    }
+
+    #[test]
+    fn leader_uses_safe_profile_when_left_panel_is_too_narrow() {
+        assert_eq!(
+            leader_render_profile(10),
+            crate::tui::sprites::renderer::RenderProfile::Safe
+        );
+        assert_eq!(
+            leader_render_profile(44),
+            crate::tui::sprites::renderer::RenderProfile::Expressive
+        );
+    }
+
+    #[test]
+    fn party_uses_safe_profile_in_compact_mode() {
+        assert_eq!(
+            party_render_profile(true, 12),
+            crate::tui::sprites::renderer::RenderProfile::Safe
+        );
+        assert_eq!(
+            party_render_profile(false, 18),
+            crate::tui::sprites::renderer::RenderProfile::Expressive
+        );
     }
 
     #[test]
