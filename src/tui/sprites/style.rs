@@ -1,5 +1,11 @@
 use ratatui::style::Color;
 
+/// Shared sprite shading tokens.
+///
+/// `highlight`, `base`, `midtone`, `shadow`, and `outline` define the shading
+/// ladder; `comb`, `beak`, `feet`, and `eye` are the accent tokens that sprite
+/// modules use to keep parts visually distinct while sharing a common palette
+/// contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpritePalette {
     pub highlight: Color,
