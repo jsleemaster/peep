@@ -6,9 +6,10 @@ use ratatui::{
     Frame,
 };
 
-use crate::protocol::types::{Agent, FeedEvent, Session};
 #[cfg(test)]
 pub(crate) use crate::protocol::normalize::normalize_ranked_command;
+use crate::protocol::types::{Agent, FeedEvent, Session};
+use crate::store::analytics::{AnalyticsQuery, AnalyticsWindow, SharedAnalytics};
 use crate::tui::app::App;
 use crate::tui::widgets::{agent_detail, stage, tab_bar};
 
@@ -21,6 +22,7 @@ pub struct StoreSnapshot {
     pub sparkline: Vec<u64>,
     pub metrics: crate::store::metrics::DerivedMetrics,
     pub available_skills: Vec<String>,
+    pub rankings: StageRankings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,12 +44,23 @@ impl RankedEntry {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StageRankings {
+    pub window: AnalyticsWindow,
+    pub agents_used: usize,
+    pub completed: usize,
     pub commands: Vec<RankedEntry>,
     pub skills: Vec<RankedEntry>,
+    pub agents: Vec<RankedEntry>,
+    pub warming: bool,
 }
 
 impl StoreSnapshot {
-    pub async fn from_store(store: &crate::store::state::SharedStore) -> Self {
+    pub async fn from_stores(
+        store: &crate::store::state::SharedStore,
+        analytics: &SharedAnalytics,
+        project: Option<&str>,
+        focused_agent: Option<&str>,
+        window: AnalyticsWindow,
+    ) -> Self {
         let s = store.read().await;
         let now = chrono::Utc::now().timestamp();
         let agents = s.sorted_agents().into_iter().cloned().collect();
@@ -56,6 +69,13 @@ impl StoreSnapshot {
         let sparkline = s.velocity_sparkline_data(15, now);
         let metrics = s.derived_metrics(now);
         let available_skills = s.available_skills.clone();
+        drop(s);
+
+        let rankings_view =
+            analytics
+                .read()
+                .await
+                .query(AnalyticsQuery::new(window, project, focused_agent, now));
         StoreSnapshot {
             agents,
             feed,
@@ -63,87 +83,24 @@ impl StoreSnapshot {
             sparkline,
             metrics,
             available_skills,
-        }
-    }
-
-    pub fn stage_rankings(
-        &self,
-        project: Option<&str>,
-        focused_agent: Option<&str>,
-    ) -> StageRankings {
-        let agents: Vec<&Agent> = self
-            .agents
-            .iter()
-            .filter(|agent| match project {
-                Some(name) => agent
-                    .cwd
-                    .as_deref()
-                    .map(stage::normalize_project_name)
-                    .as_deref()
-                    == Some(name),
-                None => true,
-            })
-            .filter(|agent| match focused_agent {
-                Some(agent_id) => agent.agent_id == agent_id,
-                None => true,
-            })
-            .collect();
-
-        let mut command_counts = std::collections::HashMap::<String, u64>::new();
-        let mut command_last_seen = std::collections::HashMap::<String, i64>::new();
-        let mut skill_counts = std::collections::HashMap::<String, u64>::new();
-        let mut skill_last_seen = std::collections::HashMap::<String, i64>::new();
-
-        for agent in agents {
-            for (name, count) in &agent.command_usage {
-                *command_counts.entry(name.clone()).or_insert(0) += count;
-                let ts = agent
-                    .command_last_seen
-                    .get(name)
-                    .copied()
-                    .unwrap_or(agent.last_event_ts);
-                command_last_seen
-                    .entry(name.clone())
-                    .and_modify(|current| *current = (*current).max(ts))
-                    .or_insert(ts);
-            }
-
-            for (name, count) in &agent.skills_invoked {
-                *skill_counts.entry(name.clone()).or_insert(0) += count;
-                let ts = agent
-                    .skill_last_seen
-                    .get(name)
-                    .copied()
-                    .unwrap_or(agent.last_event_ts);
-                skill_last_seen
-                    .entry(name.clone())
-                    .and_modify(|current| *current = (*current).max(ts))
-                    .or_insert(ts);
-            }
-        }
-
-        StageRankings {
-            commands: sorted_rankings(command_counts, command_last_seen),
-            skills: sorted_rankings(skill_counts, skill_last_seen),
+            rankings: StageRankings {
+                window: rankings_view.summary.window,
+                agents_used: rankings_view.summary.agents_used,
+                completed: rankings_view.summary.completed,
+                commands: analytics_entries(rankings_view.commands),
+                skills: analytics_entries(rankings_view.skills),
+                agents: analytics_entries(rankings_view.agents),
+                warming: rankings_view.warming,
+            },
         }
     }
 }
 
-fn sorted_rankings(
-    counts: std::collections::HashMap<String, u64>,
-    last_seen: std::collections::HashMap<String, i64>,
-) -> Vec<RankedEntry> {
-    let mut entries: Vec<_> = counts
-        .into_iter()
-        .map(|(name, count)| RankedEntry::new(name.clone(), count, last_seen.get(&name).copied().unwrap_or(0)))
-        .collect();
-    entries.sort_by(|a, b| {
-        b.count
-            .cmp(&a.count)
-            .then_with(|| b.last_seen.cmp(&a.last_seen))
-            .then_with(|| a.name.cmp(&b.name))
-    });
+fn analytics_entries(entries: Vec<crate::store::analytics::AnalyticsEntry>) -> Vec<RankedEntry> {
     entries
+        .into_iter()
+        .map(|entry| RankedEntry::new(entry.name, entry.count, entry.last_seen))
+        .collect()
 }
 
 pub fn draw(f: &mut Frame, app: &mut App, snap: &StoreSnapshot) {
@@ -152,10 +109,7 @@ pub fn draw(f: &mut Frame, app: &mut App, snap: &StoreSnapshot) {
     // Main layout: header (3) | body (fill)
     let outer_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Fill(1),
-        ])
+        .constraints([Constraint::Length(3), Constraint::Fill(1)])
         .split(size);
 
     // Header (packmen + stats)
@@ -187,14 +141,15 @@ fn render_filter_input(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow))
         .title(" Filter ")
-        .title_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let input = Paragraph::new(Line::from(vec![
         Span::styled("> ", Style::default().fg(Color::Yellow)),
-        Span::styled(
-            app.filter_text.clone(),
-            Style::default().fg(Color::White),
-        ),
+        Span::styled(app.filter_text.clone(), Style::default().fg(Color::White)),
         Span::styled("_", Style::default().fg(Color::Yellow)),
     ]))
     .block(block);
@@ -204,64 +159,28 @@ fn render_filter_input(f: &mut Frame, area: Rect, app: &App) {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_ranked_command, RankedEntry, StageRankings, StoreSnapshot};
-    use crate::protocol::types::{Agent, AgentRole, AgentState, FeedEvent, IngestSource, RuntimeEventType, SkillKind};
-    use std::collections::HashMap;
+    use super::{draw, normalize_ranked_command, StageRankings, StoreSnapshot};
+    use crate::protocol::types::{FeedEvent, IngestSource, RawIngestEvent, RuntimeEventType};
+    use crate::store::analytics::{AnalyticsQuery, AnalyticsStore, AnalyticsWindow};
+    use crate::store::metrics::DerivedMetrics;
+    use crate::tui::app::App;
+    use crate::tui::theme::{init_theme, Theme};
+    use ratatui::{backend::TestBackend, Terminal};
+    use std::sync::Once;
 
-    fn make_agent(
-        agent_id: &str,
-        cwd: &str,
-        last_event_ts: i64,
-        commands: &[(&str, u64, i64)],
-        skills: &[(&str, u64, i64)],
-    ) -> Agent {
-        let mut command_usage = HashMap::new();
-        let mut command_last_seen = HashMap::new();
-        for (name, count, ts) in commands {
-            command_usage.insert((*name).to_string(), *count);
-            command_last_seen.insert((*name).to_string(), *ts);
-        }
-
-        let mut skills_invoked = HashMap::new();
-        let mut skill_last_seen = HashMap::new();
-        for (name, count, ts) in skills {
-            skills_invoked.insert((*name).to_string(), *count);
-            skill_last_seen.insert((*name).to_string(), *ts);
-        }
-
-        Agent {
-            agent_id: agent_id.to_string(),
-            display_name: agent_id.to_string(),
-            short_id: agent_id.chars().take(8).collect(),
-            state: AgentState::Active,
-            role: AgentRole::Subagent,
-            current_skill: Some(SkillKind::Bash),
-            branch_name: None,
-            skill_usage: HashMap::new(),
-            skills_invoked,
-            skill_last_seen,
-            command_usage,
-            command_last_seen,
-            total_tokens: 0,
-            usage_count: 0,
-            tool_run_count: 0,
-            last_event_ts,
-            context_percent: None,
-            cost_usd: None,
-            model_name: None,
-            cwd: Some(cwd.to_string()),
-            ai_tool: None,
-            parent_session_id: Some("lead".to_string()),
-        }
+    fn ensure_theme() {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| init_theme(Theme::dark()));
     }
 
-    fn empty_snapshot(agents: Vec<Agent>) -> StoreSnapshot {
+    fn empty_snapshot() -> StoreSnapshot {
+        ensure_theme();
         StoreSnapshot {
-            agents,
-            feed: Vec::<FeedEvent>::new(),
+            agents: Vec::new(),
+            feed: Vec::new(),
             sessions: Vec::new(),
             sparkline: Vec::new(),
-            metrics: crate::store::metrics::DerivedMetrics {
+            metrics: DerivedMetrics {
                 total_agents: 0,
                 active_agents: 0,
                 waiting_agents: 0,
@@ -273,79 +192,222 @@ mod tests {
                 velocity_per_min: 0,
             },
             available_skills: Vec::new(),
+            rankings: StageRankings::default(),
+        }
+    }
+
+    fn raw_event(
+        agent_id: &str,
+        ts: i64,
+        tool_name: Option<&str>,
+        detail: Option<&str>,
+        cwd: &str,
+    ) -> RawIngestEvent {
+        RawIngestEvent {
+            source: IngestSource::Jsonl,
+            agent_runtime_id: agent_id.to_string(),
+            session_runtime_id: Some(format!("session-{agent_id}")),
+            ts,
+            event_type: RuntimeEventType::ToolStart,
+            hook_event_name: Some("PreToolUse".into()),
+            tool_name: tool_name.map(str::to_string),
+            file_path: None,
+            detail: detail.map(str::to_string),
+            total_tokens: None,
+            is_error: false,
+            branch_name: None,
+            slug: Some(agent_id.to_string()),
+            cwd: Some(cwd.to_string()),
+            ai_tool: Some("codex".into()),
         }
     }
 
     #[test]
     fn normalize_ranked_command_uses_subcommands_for_common_tools() {
-        assert_eq!(normalize_ranked_command("git diff --stat src/main.rs"), Some("git diff".into()));
-        assert_eq!(normalize_ranked_command("cargo test stage::tests"), Some("cargo test".into()));
-        assert_eq!(normalize_ranked_command("pnpm dev --port 3001"), Some("pnpm dev".into()));
-        assert_eq!(normalize_ranked_command("rg focused_agent src/tui"), Some("rg".into()));
+        assert_eq!(
+            normalize_ranked_command("git diff --stat src/main.rs"),
+            Some("git diff".into())
+        );
+        assert_eq!(
+            normalize_ranked_command("cargo test stage::tests"),
+            Some("cargo test".into())
+        );
+        assert_eq!(
+            normalize_ranked_command("pnpm dev --port 3001"),
+            Some("pnpm dev".into())
+        );
+        assert_eq!(
+            normalize_ranked_command("rg focused_agent src/tui"),
+            Some("rg".into())
+        );
         assert_eq!(normalize_ranked_command("  "), None);
     }
 
     #[test]
     fn stage_rankings_sort_by_count_then_last_seen() {
-        let snap = empty_snapshot(vec![
-            make_agent(
+        let mut analytics = AnalyticsStore::default();
+        analytics.ingest_runtime_event(
+            &raw_event(
                 "agent-a",
+                20,
+                Some("Bash"),
+                Some("git diff src/main.rs"),
                 "/tmp/project-a",
-                50,
-                &[("git diff", 2, 20), ("cargo test", 2, 30)],
-                &[("superpowers:brainstorming", 1, 10)],
             ),
-            make_agent(
+            "agent-a",
+            Some("project-a"),
+        );
+        analytics.ingest_runtime_event(
+            &raw_event(
+                "agent-a",
+                30,
+                Some("Bash"),
+                Some("cargo test render::tests"),
+                "/tmp/project-a",
+            ),
+            "agent-a",
+            Some("project-a"),
+        );
+        analytics.ingest_runtime_event(
+            &raw_event(
+                "agent-a",
+                10,
+                Some("Skill"),
+                Some("superpowers:brainstorming scope"),
+                "/tmp/project-a",
+            ),
+            "agent-a",
+            Some("project-a"),
+        );
+        analytics.ingest_runtime_event(
+            &raw_event(
                 "agent-b",
+                40,
+                Some("Bash"),
+                Some("cargo test stage::tests"),
                 "/tmp/project-a",
-                60,
-                &[("cargo test", 1, 40), ("rg", 3, 50)],
-                &[("superpowers:brainstorming", 2, 60), ("commit", 2, 55)],
             ),
-        ]);
+            "agent-b",
+            Some("project-a"),
+        );
+        analytics.ingest_runtime_event(
+            &raw_event(
+                "agent-b",
+                50,
+                Some("Bash"),
+                Some("rg focused_agent src/tui"),
+                "/tmp/project-a",
+            ),
+            "agent-b",
+            Some("project-a"),
+        );
+        analytics.ingest_runtime_event(
+            &raw_event(
+                "agent-b",
+                60,
+                Some("Skill"),
+                Some("superpowers:brainstorming revise"),
+                "/tmp/project-a",
+            ),
+            "agent-b",
+            Some("project-a"),
+        );
+        analytics.ingest_runtime_event(
+            &raw_event(
+                "agent-b",
+                55,
+                Some("Skill"),
+                Some("commit stage files"),
+                "/tmp/project-a",
+            ),
+            "agent-b",
+            Some("project-a"),
+        );
 
-        let StageRankings { commands, skills } = snap.stage_rankings(Some("project-a"), None);
+        let view = analytics.query(AnalyticsQuery::new(
+            AnalyticsWindow::Hours24,
+            Some("project-a"),
+            None,
+            100,
+        ));
 
         assert_eq!(
-            commands,
+            view.commands,
             vec![
-                RankedEntry::new("rg", 3, 50),
-                RankedEntry::new("cargo test", 3, 40),
-                RankedEntry::new("git diff", 2, 20),
+                crate::store::analytics::AnalyticsEntry::new("cargo test", 2, 40),
+                crate::store::analytics::AnalyticsEntry::new("rg", 1, 50),
+                crate::store::analytics::AnalyticsEntry::new("git diff", 1, 20),
             ]
         );
         assert_eq!(
-            skills,
+            view.skills,
             vec![
-                RankedEntry::new("superpowers:brainstorming", 3, 60),
-                RankedEntry::new("commit", 2, 55),
+                crate::store::analytics::AnalyticsEntry::new("superpowers:brainstorming", 2, 60),
+                crate::store::analytics::AnalyticsEntry::new("commit", 1, 55),
             ]
         );
     }
 
     #[test]
     fn stage_rankings_can_focus_on_single_agent() {
-        let snap = empty_snapshot(vec![
-            make_agent(
+        let mut analytics = AnalyticsStore::default();
+        analytics.ingest_runtime_event(
+            &raw_event(
                 "agent-a",
+                20,
+                Some("Bash"),
+                Some("git diff src/main.rs"),
                 "/tmp/project-a",
-                50,
-                &[("git diff", 2, 20)],
-                &[("commit", 1, 10)],
             ),
-            make_agent(
+            "agent-a",
+            Some("project-a"),
+        );
+        analytics.ingest_runtime_event(
+            &raw_event(
                 "agent-b",
+                40,
+                Some("Bash"),
+                Some("cargo test stage::tests"),
                 "/tmp/project-a",
-                60,
-                &[("cargo test", 3, 40)],
-                &[("superpowers:brainstorming", 2, 60)],
             ),
-        ]);
+            "agent-b",
+            Some("project-a"),
+        );
+        analytics.ingest_runtime_event(
+            &raw_event(
+                "agent-b",
+                60,
+                Some("Skill"),
+                Some("superpowers:brainstorming revise"),
+                "/tmp/project-a",
+            ),
+            "agent-b",
+            Some("project-a"),
+        );
 
-        let StageRankings { commands, skills } = snap.stage_rankings(Some("project-a"), Some("agent-b"));
+        let view = analytics.query(AnalyticsQuery::new(
+            AnalyticsWindow::Hours24,
+            Some("project-a"),
+            Some("agent-b"),
+            100,
+        ));
 
-        assert_eq!(commands, vec![RankedEntry::new("cargo test", 3, 40)]);
-        assert_eq!(skills, vec![RankedEntry::new("superpowers:brainstorming", 2, 60)]);
+        assert_eq!(
+            view.commands,
+            vec![crate::store::analytics::AnalyticsEntry::new(
+                "cargo test",
+                1,
+                40
+            )]
+        );
+        assert_eq!(
+            view.skills,
+            vec![crate::store::analytics::AnalyticsEntry::new(
+                "superpowers:brainstorming",
+                1,
+                60,
+            )]
+        );
     }
 
     #[test]
@@ -368,5 +430,25 @@ mod tests {
         };
 
         assert_eq!(event.tool_name.as_deref(), Some("Bash"));
+    }
+
+    #[test]
+    fn draw_does_not_panic_on_narrow_empty_terminal() {
+        let backend = TestBackend::new(16, 82);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(8080);
+        let snap = empty_snapshot();
+
+        terminal.draw(|frame| draw(frame, &mut app, &snap)).unwrap();
+    }
+
+    #[test]
+    fn draw_does_not_panic_on_medium_empty_terminal() {
+        let backend = TestBackend::new(38, 83);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(8080);
+        let snap = empty_snapshot();
+
+        terminal.draw(|frame| draw(frame, &mut app, &snap)).unwrap();
     }
 }

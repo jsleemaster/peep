@@ -18,8 +18,14 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     let t = theme();
 
     let mut title_spans = vec![
-        Span::styled(" peep", Style::default().fg(t.brand).add_modifier(Modifier::BOLD)),
-        Span::styled(format!(" v{}", crate::update::UpdateStatus::current()), Style::default().fg(t.text_dim)),
+        Span::styled(
+            " peep",
+            Style::default().fg(t.brand).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" v{}", crate::update::UpdateStatus::current()),
+            Style::default().fg(t.text_dim),
+        ),
     ];
     if let Some(ref new_ver) = app.update_available {
         title_spans.push(Span::styled(
@@ -29,8 +35,16 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     }
     let title_line = Line::from(title_spans);
 
-    let active_count = snap.agents.iter().filter(|a| a.state == AgentState::Active).count();
-    let waiting_count = snap.agents.iter().filter(|a| a.state == AgentState::Waiting).count();
+    let active_count = snap
+        .agents
+        .iter()
+        .filter(|a| a.state == AgentState::Active)
+        .count();
+    let waiting_count = snap
+        .agents
+        .iter()
+        .filter(|a| a.state == AgentState::Waiting)
+        .count();
     let party_summary = if !snap.agents.is_empty() {
         stage::party_summary(snap)
     } else {
@@ -40,7 +54,9 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     let sep = Span::styled(" \u{2502} ", Style::default().fg(t.border));
 
     // Show branch from the most recently active agent
-    let branch = snap.agents.iter()
+    let branch = snap
+        .agents
+        .iter()
         .filter(|a| a.state == AgentState::Active)
         .max_by_key(|a| a.last_event_ts)
         .or_else(|| snap.agents.first())
@@ -48,19 +64,31 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
 
     let mut stats = vec![
         Span::styled(" ", Style::default()),
-        Span::styled(format!("\u{25cf}{}", active_count), Style::default().fg(t.accent_green)),
+        Span::styled(
+            format!("\u{25cf}{}", active_count),
+            Style::default().fg(t.accent_green),
+        ),
         Span::raw(" "),
-        Span::styled(format!("\u{25d0}{}", waiting_count), Style::default().fg(t.accent_yellow)),
+        Span::styled(
+            format!("\u{25d0}{}", waiting_count),
+            Style::default().fg(t.accent_yellow),
+        ),
     ];
 
     if !party_summary.is_empty() {
         stats.push(sep.clone());
-        stats.push(Span::styled(party_summary, Style::default().fg(t.text_muted)));
+        stats.push(Span::styled(
+            party_summary,
+            Style::default().fg(t.text_muted),
+        ));
     }
 
     if let Some(br) = branch {
         stats.push(sep.clone());
-        stats.push(Span::styled(format!("\u{e0a0} {}", br), Style::default().fg(t.accent_cyan)));
+        stats.push(Span::styled(
+            format!("\u{e0a0} {}", br),
+            Style::default().fg(t.accent_cyan),
+        ));
     }
 
     stats.push(sep.clone());
@@ -78,7 +106,7 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
         ));
     }
 
-    let hint = "q:quit j/k:scroll []:project Enter:filter";
+    let hint = "q:quit j/k:scroll Tab:section ,/.:window []:project Enter:filter";
     let left_len: usize = stats.iter().map(|s| s.content.chars().count()).sum();
     let padding = (area.width as usize).saturating_sub(left_len + hint.chars().count() + 2);
     stats.push(Span::raw(" ".repeat(padding)));
