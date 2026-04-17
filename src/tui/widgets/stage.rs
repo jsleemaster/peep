@@ -13,7 +13,7 @@ use crate::store::state::AppStore;
 use crate::tui::app::{App, RankingsSection};
 use crate::tui::render::{RankedEntry, StoreSnapshot};
 use crate::tui::sprites::renderer::{render_sprite, RenderOptions, RenderProfile};
-use crate::tui::sprites::{chicken, leader, party};
+use crate::tui::sprites::{leader, party};
 use crate::tui::theme::theme;
 
 fn bg() -> Color {
@@ -230,21 +230,21 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
             compact: false,
         },
     );
+    let leader_w = rendered_width(&leader_lines).min(area.width);
 
     // Center everything
     let content_height = leader_lines.len() as u16 + 10; // sprite + text
     let start_y = area.y + area.height.saturating_sub(content_height) / 2;
     let center_x = area.x + area.width / 2;
 
-    // Draw chicken centered
-    let sprite_w = 28u16.min(area.width); // 14px * 2
-    let sprite_x = center_x.saturating_sub(sprite_w / 2);
+    // Draw leader centered
+    let sprite_x = center_x.saturating_sub(leader_w / 2);
     for (j, line) in leader_lines.iter().enumerate() {
         let y = start_y + j as u16;
         if y < area.y + area.height {
             f.render_widget(
                 Paragraph::new(line.clone()).style(Style::default().bg(card_bg())),
-                Rect::new(sprite_x, y, sprite_w, 1),
+                Rect::new(sprite_x, y, leader_w, 1),
             );
         }
     }
@@ -378,14 +378,14 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             compact: leader_profile == RenderProfile::Safe,
         },
     );
-    let cw = 14u16.min(li.width);
-    let cx = li.x + (li.width.saturating_sub(cw)) / 2;
+    let leader_w = rendered_width(&leader_lines).min(li.width);
+    let cx = li.x + (li.width.saturating_sub(leader_w)) / 2;
     for (j, line) in leader_lines.iter().enumerate() {
         let sy = y + j as u16;
         if sy < li.y + li.height {
             f.render_widget(
                 Paragraph::new(line.clone()).style(Style::default().bg(card_bg())),
-                Rect::new(cx, sy, cw, 1),
+                Rect::new(cx, sy, leader_w, 1),
             );
         }
     }
@@ -476,7 +476,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             let i = visible.start + row_idx;
 
             let is_done = member.state == AgentState::Completed;
-            let stage = chicken::agent_growth_stage(member.usage_count, is_done);
+            let stage = party::growth_stage(member.usage_count, is_done);
             let stage_icon = match stage {
                 "egg" => "\u{1f95a}",
                 "hatching" => "\u{1fab6}",
@@ -586,12 +586,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                     compact: true,
                 },
             );
-            let spr_w = if stage == "egg" || stage == "hatching" {
-                6u16
-            } else {
-                8u16
-            }
-            .min(col_w);
+            let spr_w = rendered_width(&spr_lines).min(col_w);
             let spr_x = mx + (col_w.saturating_sub(spr_w)) / 2;
 
             for (j, line) in spr_lines.iter().enumerate() {
@@ -1295,7 +1290,7 @@ fn sub_agent_stage_icon(e: &FeedEvent, snap: &StoreSnapshot) -> &'static str {
         .find(|a| a.agent_id == e.agent_id)
         .map(|a| {
             let is_done = a.state == AgentState::Completed;
-            match chicken::agent_growth_stage(a.usage_count, is_done) {
+            match party::growth_stage(a.usage_count, is_done) {
                 "egg" => "\u{1f95a}",
                 "hatching" => "\u{1fab6}",
                 "peeking" => "\u{1f425}",
@@ -1348,7 +1343,7 @@ pub fn party_summary(snap: &StoreSnapshot) -> String {
             continue; // skip leader, already counted
         }
         let is_done = agent.state == AgentState::Completed;
-        let stage = chicken::agent_growth_stage(agent.usage_count, is_done);
+        let stage = party::growth_stage(agent.usage_count, is_done);
         match stage {
             "chick" => chicks += 1,
             "done" => stars += 1,
@@ -1417,14 +1412,30 @@ fn party_render_profile(use_compact: bool, col_w: u16) -> RenderProfile {
     }
 }
 
+fn rendered_width(lines: &[Line<'_>]) -> u16 {
+    lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+                .sum::<usize>()
+        })
+        .max()
+        .unwrap_or(0)
+        .min(u16::MAX as usize) as u16
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        leader_render_profile, party_render_profile, party_row_layout,
+        leader_render_profile, party_render_profile, party_row_layout, rendered_width,
         resolve_pending_focus_select, sidebar_agents, visible_party_window,
     };
     use crate::protocol::types::{Agent, AgentRole, AgentState, SkillKind};
     use crate::tui::app::App;
+    use crate::tui::sprites::leader;
+    use crate::tui::sprites::renderer::{render_sprite, RenderOptions, RenderProfile};
     use std::collections::HashMap;
 
     fn make_agent(agent_id: &str, role: AgentRole, parent_session_id: Option<&str>) -> Agent {
@@ -1493,14 +1504,24 @@ mod tests {
 
     #[test]
     fn party_uses_safe_profile_in_compact_mode() {
-        assert_eq!(
-            party_render_profile(true, 12),
-            crate::tui::sprites::renderer::RenderProfile::Safe
+        assert_eq!(party_render_profile(true, 12), RenderProfile::Safe);
+        assert_eq!(party_render_profile(false, 7), RenderProfile::Safe);
+        assert_eq!(party_render_profile(false, 18), RenderProfile::Expressive);
+        assert_eq!(party_render_profile(false, 8), RenderProfile::Expressive);
+    }
+
+    #[test]
+    fn rendered_width_matches_expressive_leader_output() {
+        let lines = render_sprite(
+            &leader::leader_idle(0),
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: false,
+            },
         );
-        assert_eq!(
-            party_render_profile(false, 18),
-            crate::tui::sprites::renderer::RenderProfile::Expressive
-        );
+
+        assert_eq!(rendered_width(&lines), 16);
     }
 
     #[test]
