@@ -222,15 +222,8 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
     } else {
         leader::leader_peck(tick / 150)
     };
-    let leader_profile = leader_render_profile(area.width);
-    let leader_lines = render_sprite(
-        &leader_pixels,
-        card_bg(),
-        RenderOptions {
-            profile: leader_profile,
-            compact: leader_profile == RenderProfile::Safe,
-        },
-    );
+    let leader_options = leader_render_options(area.width, card_bg(), &leader_pixels);
+    let leader_lines = render_sprite(&leader_pixels, card_bg(), leader_options);
     let leader_w = rendered_width(&leader_lines).min(area.width);
 
     // Center everything
@@ -370,15 +363,8 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     } else {
         leader::leader_idle(tick / 4)
     };
-    let leader_profile = leader_render_profile(li.width);
-    let leader_lines = render_sprite(
-        &leader_pixels,
-        card_bg(),
-        RenderOptions {
-            profile: leader_profile,
-            compact: leader_profile == RenderProfile::Safe,
-        },
-    );
+    let leader_options = leader_render_options(li.width, card_bg(), &leader_pixels);
+    let leader_lines = render_sprite(&leader_pixels, card_bg(), leader_options);
     let leader_w = rendered_width(&leader_lines).min(li.width);
     let cx = li.x + (li.width.saturating_sub(leader_w)) / 2;
     for (j, line) in leader_lines.iter().enumerate() {
@@ -578,15 +564,8 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                 _ => party::party_egg(),
             };
 
-            let profile = party_render_profile(use_compact, col_w);
-            let spr_lines = render_sprite(
-                &sprite,
-                card_bg(),
-                RenderOptions {
-                    profile,
-                    compact: true,
-                },
-            );
+            let profile = party_render_options(col_w, card_bg(), &sprite);
+            let spr_lines = render_sprite(&sprite, card_bg(), profile);
             let spr_w = rendered_width(&spr_lines).min(col_w);
             let spr_x = mx + (col_w.saturating_sub(spr_w)) / 2;
 
@@ -1397,22 +1376,6 @@ fn party_row_layout(total_width: usize, status: &str) -> (usize, usize) {
     (name_width, status_width)
 }
 
-fn leader_render_profile(width: u16) -> RenderProfile {
-    if width < 14 {
-        RenderProfile::Safe
-    } else {
-        RenderProfile::Expressive
-    }
-}
-
-fn party_render_profile(use_compact: bool, col_w: u16) -> RenderProfile {
-    if use_compact || col_w < 8 {
-        RenderProfile::Safe
-    } else {
-        RenderProfile::Expressive
-    }
-}
-
 fn rendered_width(lines: &[Line<'_>]) -> u16 {
     lines
         .iter()
@@ -1427,15 +1390,61 @@ fn rendered_width(lines: &[Line<'_>]) -> u16 {
         .min(u16::MAX as usize) as u16
 }
 
+fn leader_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -> RenderOptions {
+    compact_fit_render_options(width, bg, pixels)
+}
+
+fn party_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -> RenderOptions {
+    compact_fit_render_options(width, bg, pixels)
+}
+
+fn compact_fit_render_options(
+    width: u16,
+    bg: Color,
+    pixels: &[Vec<Option<Color>>],
+) -> RenderOptions {
+    let expressive = RenderOptions {
+        profile: RenderProfile::Expressive,
+        compact: true,
+    };
+    let expressive_width = rendered_width(&render_sprite(pixels, bg, expressive));
+
+    let safe = RenderOptions {
+        profile: RenderProfile::Safe,
+        compact: true,
+    };
+    let safe_width = rendered_width(&render_sprite(pixels, bg, safe));
+
+    match (expressive_width <= width, safe_width <= width) {
+        (true, false) => expressive,
+        (false, true) => safe,
+        (true, true) => {
+            if expressive_width <= safe_width {
+                expressive
+            } else {
+                safe
+            }
+        }
+        (false, false) => {
+            if expressive_width <= safe_width {
+                expressive
+            } else {
+                safe
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        leader_render_profile, party_render_profile, party_row_layout, rendered_width,
+        leader_render_options, party_render_options, party_row_layout, rendered_width,
         resolve_pending_focus_select, sidebar_agents, visible_party_window,
     };
     use crate::protocol::types::{Agent, AgentRole, AgentState, SkillKind};
     use crate::tui::app::App;
     use crate::tui::sprites::leader;
+    use crate::tui::sprites::party;
     use crate::tui::sprites::renderer::{render_sprite, RenderOptions, RenderProfile};
     use std::collections::HashMap;
 
@@ -1493,46 +1502,50 @@ mod tests {
 
     #[test]
     fn leader_uses_safe_profile_when_left_panel_is_too_narrow() {
-        assert_eq!(
-            leader_render_profile(10),
-            crate::tui::sprites::renderer::RenderProfile::Safe
-        );
-        assert_eq!(
-            leader_render_profile(44),
-            crate::tui::sprites::renderer::RenderProfile::Expressive
-        );
+        let sprite = leader::leader_idle(0);
+        let options = leader_render_options(10, ratatui::style::Color::Black, &sprite);
+        let lines = render_sprite(&sprite, ratatui::style::Color::Black, options);
+
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(options.compact);
+        assert!(rendered_width(&lines) <= 10);
     }
 
     #[test]
     fn party_uses_safe_profile_in_compact_mode() {
-        assert_eq!(party_render_profile(true, 12), RenderProfile::Safe);
-        assert_eq!(party_render_profile(false, 7), RenderProfile::Safe);
-        assert_eq!(party_render_profile(false, 18), RenderProfile::Expressive);
-        assert_eq!(party_render_profile(false, 8), RenderProfile::Expressive);
+        let sprite = party::party_walking(0);
+        let options = party_render_options(7, ratatui::style::Color::Black, &sprite);
+        let lines = render_sprite(&sprite, ratatui::style::Color::Black, options);
+        let safe_lines = render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Safe,
+                compact: true,
+            },
+        );
+
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(options.compact);
+        assert!(rendered_width(&lines) <= rendered_width(&safe_lines));
     }
 
     #[test]
     fn narrow_empty_state_leader_uses_compact_safe_fallback() {
-        let profile = leader_render_profile(10);
-        let compact_lines = render_sprite(
-            &leader::leader_idle(0),
+        let sprite = leader::leader_idle(0);
+        let options = leader_render_options(10, ratatui::style::Color::Black, &sprite);
+        let lines = render_sprite(
+            &sprite,
             ratatui::style::Color::Black,
             RenderOptions {
-                profile,
-                compact: profile == RenderProfile::Safe,
-            },
-        );
-        let noncompact_lines = render_sprite(
-            &leader::leader_idle(0),
-            ratatui::style::Color::Black,
-            RenderOptions {
-                profile,
-                compact: false,
+                profile: options.profile,
+                compact: options.compact,
             },
         );
 
-        assert_eq!(profile, RenderProfile::Safe);
-        assert!(rendered_width(&compact_lines) < rendered_width(&noncompact_lines));
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(options.compact);
+        assert!(rendered_width(&lines) <= 10);
     }
 
     #[test]
