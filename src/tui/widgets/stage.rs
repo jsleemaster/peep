@@ -1444,7 +1444,7 @@ fn leader_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -
         profile: RenderProfile::Expressive,
         compact: false,
     };
-    let full_width = rendered_visible_width(&render_sprite(pixels, bg, full));
+    let full_width = rendered_fit_width(&render_sprite(pixels, bg, full));
     if full_width <= width {
         return full;
     }
@@ -1454,7 +1454,7 @@ fn leader_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -
         compact: true,
     };
     let compact_expressive_width =
-        rendered_visible_width(&render_sprite(pixels, bg, compact_expressive));
+        rendered_fit_width(&render_sprite(pixels, bg, compact_expressive));
     if compact_expressive_width <= width {
         return compact_expressive;
     }
@@ -1466,7 +1466,7 @@ fn party_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) ->
         profile: RenderProfile::Expressive,
         compact: false,
     };
-    let expressive_width = rendered_visible_width(&render_sprite(pixels, bg, expressive));
+    let expressive_width = rendered_fit_width(&render_sprite(pixels, bg, expressive));
     if expressive_width <= width {
         return expressive;
     }
@@ -1478,37 +1478,18 @@ fn party_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) ->
 }
 
 fn rendered_visible_width(lines: &[Line<'_>]) -> u16 {
-    lines
-        .iter()
-        .map(|line| {
-            let spans = &line.spans;
-            let start = spans
-                .iter()
-                .position(|span| !span.content.chars().all(char::is_whitespace));
-            let end = spans
-                .iter()
-                .rposition(|span| !span.content.chars().all(char::is_whitespace));
+    rendered_fit_width(lines)
+}
 
-            let Some(start) = start else {
-                return 0usize;
-            };
-            let end = end.unwrap_or(start);
-
-            spans[start..=end]
-                .iter()
-                .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
-                .sum::<usize>()
-        })
-        .max()
-        .unwrap_or(0)
-        .min(u16::MAX as usize) as u16
+fn rendered_fit_width(lines: &[Line<'_>]) -> u16 {
+    rendered_canvas_width(&trim_rendered_sprite_lines(lines))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         leader_render_options, party_render_options, party_row_layout, rendered_canvas_width,
-        rendered_visible_width, resolve_pending_focus_select, sidebar_agents,
+        rendered_fit_width, rendered_visible_width, resolve_pending_focus_select, sidebar_agents,
         trim_rendered_sprite_lines, visible_party_window,
     };
     use crate::protocol::types::{Agent, AgentRole, AgentState, SkillKind};
@@ -1713,6 +1694,32 @@ mod tests {
 
         assert_eq!(options.profile, RenderProfile::Expressive);
         assert!(!options.compact);
+    }
+
+    #[test]
+    fn asymmetric_silhouette_fit_width_matches_trimmed_box() {
+        let ink = Span::raw("XX");
+        let lines = vec![
+            Line::from(vec![
+                Span::raw(" "),
+                Span::raw(" "),
+                ink.clone(),
+                ink.clone(),
+                Span::raw(" "),
+            ]),
+            Line::from(vec![
+                Span::raw(" "),
+                ink.clone(),
+                ink.clone(),
+                Span::raw(" "),
+                Span::raw(" "),
+            ]),
+        ];
+        let trimmed = trim_rendered_sprite_lines(&lines);
+
+        assert!(rendered_canvas_width(&trimmed) < rendered_canvas_width(&lines));
+        assert_eq!(rendered_fit_width(&lines), rendered_canvas_width(&trimmed));
+        assert_eq!(rendered_fit_width(&lines), rendered_visible_width(&lines));
     }
 
     #[test]
