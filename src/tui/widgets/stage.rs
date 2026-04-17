@@ -224,7 +224,7 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
     };
     let leader_options = leader_render_options(area.width, card_bg(), &leader_pixels);
     let leader_lines = render_sprite(&leader_pixels, card_bg(), leader_options);
-    let leader_w = rendered_width(&leader_lines).min(area.width);
+    let leader_w = rendered_canvas_width(&leader_lines).min(area.width);
 
     // Center everything
     let content_height = leader_lines.len() as u16 + 10; // sprite + text
@@ -365,7 +365,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     };
     let leader_options = leader_render_options(li.width, card_bg(), &leader_pixels);
     let leader_lines = render_sprite(&leader_pixels, card_bg(), leader_options);
-    let leader_w = rendered_width(&leader_lines).min(li.width);
+    let leader_w = rendered_canvas_width(&leader_lines).min(li.width);
     let cx = li.x + (li.width.saturating_sub(leader_w)) / 2;
     for (j, line) in leader_lines.iter().enumerate() {
         let sy = y + j as u16;
@@ -566,7 +566,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
 
             let profile = party_render_options(col_w, card_bg(), &sprite);
             let spr_lines = render_sprite(&sprite, card_bg(), profile);
-            let spr_w = rendered_width(&spr_lines).min(col_w);
+            let spr_w = rendered_canvas_width(&spr_lines).min(col_w);
             let spr_x = mx + (col_w.saturating_sub(spr_w)) / 2;
 
             for (j, line) in spr_lines.iter().enumerate() {
@@ -1376,7 +1376,7 @@ fn party_row_layout(total_width: usize, status: &str) -> (usize, usize) {
     (name_width, status_width)
 }
 
-fn rendered_width(lines: &[Line<'_>]) -> u16 {
+fn rendered_canvas_width(lines: &[Line<'_>]) -> u16 {
     lines
         .iter()
         .map(|line| {
@@ -1395,7 +1395,7 @@ fn leader_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -
         profile: RenderProfile::Expressive,
         compact: false,
     };
-    let full_width = rendered_width(&render_sprite(pixels, bg, full));
+    let full_width = rendered_visible_width(&render_sprite(pixels, bg, full));
     if full_width <= width {
         return full;
     }
@@ -1404,7 +1404,8 @@ fn leader_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -
         profile: RenderProfile::Expressive,
         compact: true,
     };
-    let compact_expressive_width = rendered_width(&render_sprite(pixels, bg, compact_expressive));
+    let compact_expressive_width =
+        rendered_visible_width(&render_sprite(pixels, bg, compact_expressive));
     if compact_expressive_width <= width {
         return compact_expressive;
     }
@@ -1413,8 +1414,8 @@ fn leader_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -
         profile: RenderProfile::Safe,
         compact: true,
     };
-    let safe_width = rendered_width(&render_sprite(pixels, bg, safe));
-    if safe_width <= width || safe_width < compact_expressive_width {
+    let safe_width = rendered_visible_width(&render_sprite(pixels, bg, safe));
+    if safe_width <= width && safe_width <= compact_expressive_width {
         safe
     } else {
         compact_expressive
@@ -1422,57 +1423,60 @@ fn leader_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -
 }
 
 fn party_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -> RenderOptions {
-    compact_fit_render_options(width, bg, pixels)
-}
-
-fn compact_fit_render_options(
-    width: u16,
-    bg: Color,
-    pixels: &[Vec<Option<Color>>],
-) -> RenderOptions {
     let expressive = RenderOptions {
         profile: RenderProfile::Expressive,
-        compact: true,
+        compact: false,
     };
-    let expressive_width = rendered_width(&render_sprite(pixels, bg, expressive));
-
-    let safe = RenderOptions {
-        profile: RenderProfile::Safe,
-        compact: true,
-    };
-    let safe_width = rendered_width(&render_sprite(pixels, bg, safe));
-
-    match (expressive_width <= width, safe_width <= width) {
-        (true, false) => expressive,
-        (false, true) => safe,
-        (true, true) => {
-            if expressive_width <= safe_width {
-                expressive
-            } else {
-                safe
-            }
-        }
-        (false, false) => {
-            if expressive_width <= safe_width {
-                expressive
-            } else {
-                safe
-            }
-        }
+    let expressive_width = rendered_visible_width(&render_sprite(pixels, bg, expressive));
+    if expressive_width <= width {
+        return expressive;
     }
+
+    RenderOptions {
+        profile: RenderProfile::Expressive,
+        compact: true,
+    }
+}
+
+fn rendered_visible_width(lines: &[Line<'_>]) -> u16 {
+    lines
+        .iter()
+        .map(|line| {
+            let spans = &line.spans;
+            let start = spans
+                .iter()
+                .position(|span| !span.content.chars().all(char::is_whitespace));
+            let end = spans
+                .iter()
+                .rposition(|span| !span.content.chars().all(char::is_whitespace));
+
+            let Some(start) = start else {
+                return 0usize;
+            };
+            let end = end.unwrap_or(start);
+
+            spans[start..=end]
+                .iter()
+                .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+                .sum::<usize>()
+        })
+        .max()
+        .unwrap_or(0)
+        .min(u16::MAX as usize) as u16
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        leader_render_options, party_render_options, party_row_layout, rendered_width,
-        resolve_pending_focus_select, sidebar_agents, visible_party_window,
+        leader_render_options, party_render_options, party_row_layout, rendered_canvas_width,
+        rendered_visible_width, resolve_pending_focus_select, sidebar_agents, visible_party_window,
     };
     use crate::protocol::types::{Agent, AgentRole, AgentState, SkillKind};
     use crate::tui::app::App;
     use crate::tui::sprites::leader;
     use crate::tui::sprites::party;
     use crate::tui::sprites::renderer::{render_sprite, RenderOptions, RenderProfile};
+    use ratatui::text::{Line, Span};
     use std::collections::HashMap;
 
     fn make_agent(agent_id: &str, role: AgentRole, parent_session_id: Option<&str>) -> Agent {
@@ -1528,14 +1532,14 @@ mod tests {
     }
 
     #[test]
-    fn leader_uses_safe_profile_when_left_panel_is_too_narrow() {
+    fn narrow_leader_uses_compact_expressive_render() {
         let sprite = leader::leader_idle(0);
         let options = leader_render_options(10, ratatui::style::Color::Black, &sprite);
         let lines = render_sprite(&sprite, ratatui::style::Color::Black, options);
 
         assert_eq!(options.profile, RenderProfile::Expressive);
         assert!(options.compact);
-        assert!(rendered_width(&lines) <= 10);
+        assert!(rendered_visible_width(&lines) <= 10);
     }
 
     #[test]
@@ -1543,33 +1547,45 @@ mod tests {
         let sprite = leader::leader_idle(0);
         let options = leader_render_options(44, ratatui::style::Color::Black, &sprite);
         let lines = render_sprite(&sprite, ratatui::style::Color::Black, options);
-
-        assert_eq!(options.profile, RenderProfile::Expressive);
-        assert!(!options.compact);
-        assert_eq!(rendered_width(&lines), 16);
-    }
-
-    #[test]
-    fn party_uses_safe_profile_in_compact_mode() {
-        let sprite = party::party_walking(0);
-        let options = party_render_options(7, ratatui::style::Color::Black, &sprite);
-        let lines = render_sprite(&sprite, ratatui::style::Color::Black, options);
-        let safe_lines = render_sprite(
+        let full_lines = render_sprite(
             &sprite,
             ratatui::style::Color::Black,
             RenderOptions {
-                profile: RenderProfile::Safe,
+                profile: RenderProfile::Expressive,
+                compact: false,
+            },
+        );
+        let compact_lines = render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
                 compact: true,
             },
         );
 
         assert_eq!(options.profile, RenderProfile::Expressive);
-        assert!(options.compact);
-        assert!(rendered_width(&lines) <= rendered_width(&safe_lines));
+        assert!(!options.compact);
+        assert!(rendered_canvas_width(&lines) > rendered_canvas_width(&compact_lines));
+        assert_eq!(
+            rendered_visible_width(&lines),
+            rendered_visible_width(&full_lines)
+        );
     }
 
     #[test]
-    fn narrow_empty_state_leader_uses_compact_safe_fallback() {
+    fn narrow_party_grid_uses_compact_expressive_render() {
+        let sprite = party::party_walking(0);
+        let options = party_render_options(7, ratatui::style::Color::Black, &sprite);
+        let lines = render_sprite(&sprite, ratatui::style::Color::Black, options);
+
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(options.compact);
+        assert!(rendered_visible_width(&lines) <= 7);
+    }
+
+    #[test]
+    fn narrow_empty_state_leader_uses_compact_expressive_render() {
         let sprite = leader::leader_idle(0);
         let options = leader_render_options(10, ratatui::style::Color::Black, &sprite);
         let lines = render_sprite(
@@ -1583,7 +1599,7 @@ mod tests {
 
         assert_eq!(options.profile, RenderProfile::Expressive);
         assert!(options.compact);
-        assert!(rendered_width(&lines) <= 10);
+        assert!(rendered_visible_width(&lines) <= 10);
     }
 
     #[test]
@@ -1597,7 +1613,14 @@ mod tests {
             },
         );
 
-        assert_eq!(rendered_width(&lines), 16);
+        assert_eq!(rendered_canvas_width(&lines), 16);
+    }
+
+    #[test]
+    fn visible_width_helper_ignores_blank_margins() {
+        let line = Line::from(vec![Span::raw("   "), Span::raw("abc"), Span::raw("   ")]);
+
+        assert_eq!(rendered_visible_width(&[line]), 3);
     }
 
     #[test]
