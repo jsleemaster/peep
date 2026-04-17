@@ -222,12 +222,13 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
     } else {
         leader::leader_peck(tick / 150)
     };
+    let leader_profile = leader_render_profile(area.width);
     let leader_lines = render_sprite(
         &leader_pixels,
         card_bg(),
         RenderOptions {
-            profile: leader_render_profile(area.width),
-            compact: false,
+            profile: leader_profile,
+            compact: leader_profile == RenderProfile::Safe,
         },
     );
     let leader_w = rendered_width(&leader_lines).min(area.width);
@@ -1508,6 +1509,30 @@ mod tests {
         assert_eq!(party_render_profile(false, 7), RenderProfile::Safe);
         assert_eq!(party_render_profile(false, 18), RenderProfile::Expressive);
         assert_eq!(party_render_profile(false, 8), RenderProfile::Expressive);
+    }
+
+    #[test]
+    fn narrow_empty_state_leader_uses_compact_safe_fallback() {
+        let profile = leader_render_profile(10);
+        let compact_lines = render_sprite(
+            &leader::leader_idle(0),
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile,
+                compact: profile == RenderProfile::Safe,
+            },
+        );
+        let noncompact_lines = render_sprite(
+            &leader::leader_idle(0),
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile,
+                compact: false,
+            },
+        );
+
+        assert_eq!(profile, RenderProfile::Safe);
+        assert!(rendered_width(&compact_lines) < rendered_width(&noncompact_lines));
     }
 
     #[test]
