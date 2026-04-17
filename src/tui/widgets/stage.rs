@@ -1649,6 +1649,30 @@ mod tests {
     }
 
     #[test]
+    fn leader_and_party_profiles_do_not_return_empty_lines() {
+        let leader_pixels = crate::tui::sprites::leader::leader_idle(0);
+        let leader_lines = crate::tui::sprites::renderer::render_sprite(
+            &leader_pixels,
+            ratatui::style::Color::Black,
+            crate::tui::sprites::renderer::RenderOptions {
+                profile: crate::tui::sprites::renderer::RenderProfile::Expressive,
+                compact: false,
+            },
+        );
+        let party_pixels = crate::tui::sprites::party::party_walking(0);
+        let party_lines = crate::tui::sprites::renderer::render_sprite(
+            &party_pixels,
+            ratatui::style::Color::Black,
+            crate::tui::sprites::renderer::RenderOptions {
+                profile: crate::tui::sprites::renderer::RenderProfile::Safe,
+                compact: true,
+            },
+        );
+        assert!(!leader_lines.is_empty());
+        assert!(!party_lines.is_empty());
+    }
+
+    #[test]
     fn leader_boundary_keeps_full_expressive_when_visible_width_fits() {
         let sprite = leader::leader_idle(0);
         let full = render_sprite(
