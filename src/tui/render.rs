@@ -249,18 +249,33 @@ mod tests {
         }
     }
 
-    fn buffer_contains_sprite_glyphs(buffer: &Buffer) -> bool {
-        const SPRITE_GLYPHS: [char; 15] = [
-            '█', '▀', '▄', '▐', '▌', '▛', '▜', '▙', '▟', '▚', '▞', '▖', '▗', '▘', '▝',
+    fn buffer_row_text(buffer: &Buffer, y: u16) -> String {
+        (0..buffer.area.width)
+            .map(|x| buffer.cell((x, y)).map(|cell| cell.symbol()).unwrap_or(" "))
+            .collect()
+    }
+
+    fn find_row(buffer: &Buffer, needle: &str) -> Option<u16> {
+        (0..buffer.area.height).find(|&y| buffer_row_text(buffer, y).contains(needle))
+    }
+
+    fn buffer_contains_leader_sprite_glyphs(buffer: &Buffer) -> bool {
+        const SPRITE_GLYPHS: [char; 14] = [
+            '▀', '▄', '▐', '▌', '▛', '▜', '▙', '▟', '▚', '▞', '▖', '▗', '▘', '▝',
         ];
 
-        let x_start = 1u16;
-        let y_start = 6u16;
-        let x_end = buffer.area.width.saturating_sub(1).min(43);
-        let y_end = buffer.area.height.min(13);
+        let Some(lead_row) = find_row(buffer, "lead") else {
+            return false;
+        };
+        let Some(hp_row) = find_row(buffer, " HP ") else {
+            return false;
+        };
+        if hp_row <= lead_row + 1 {
+            return false;
+        }
 
-        for y in y_start..y_end {
-            for x in x_start..x_end {
+        for y in (lead_row + 1)..hp_row {
+            for x in 0..buffer.area.width {
                 if let Some(cell) = buffer.cell((x, y)) {
                     if cell.symbol().chars().any(|ch| SPRITE_GLYPHS.contains(&ch)) {
                         return true;
@@ -536,7 +551,7 @@ mod tests {
         let snap = active_agent_snapshot();
 
         terminal.draw(|frame| draw(frame, &mut app, &snap)).unwrap();
-        assert!(buffer_contains_sprite_glyphs(terminal.backend().buffer()));
+        assert!(buffer_contains_leader_sprite_glyphs(terminal.backend().buffer()));
     }
 
     #[test]
@@ -547,6 +562,6 @@ mod tests {
         let snap = active_agent_snapshot();
 
         terminal.draw(|frame| draw(frame, &mut app, &snap)).unwrap();
-        assert!(buffer_contains_sprite_glyphs(terminal.backend().buffer()));
+        assert!(buffer_contains_leader_sprite_glyphs(terminal.backend().buffer()));
     }
 }
