@@ -451,4 +451,126 @@ mod tests {
 
         terminal.draw(|frame| draw(frame, &mut app, &snap)).unwrap();
     }
+
+    #[test]
+    fn draw_renders_non_empty_output_with_agent_present() {
+        use crate::protocol::types::{Agent, AgentRole, AgentState, SkillKind};
+        use crate::store::metrics::DerivedMetrics;
+        use ratatui::{backend::TestBackend, Terminal};
+        use std::collections::HashMap;
+
+        ensure_theme();
+        let backend = TestBackend::new(60, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(8080);
+        let snap = StoreSnapshot {
+            agents: vec![Agent {
+                agent_id: "lead".into(),
+                display_name: "lead".into(),
+                short_id: "lead".into(),
+                first_seen_ts: 0,
+                state: AgentState::Active,
+                role: AgentRole::Main,
+                current_skill: Some(SkillKind::Bash),
+                branch_name: None,
+                skill_usage: HashMap::new(),
+                skills_invoked: HashMap::new(),
+                skill_last_seen: HashMap::new(),
+                command_usage: HashMap::new(),
+                command_last_seen: HashMap::new(),
+                total_tokens: 100,
+                usage_count: 5,
+                tool_run_count: 1,
+                last_event_ts: 1,
+                completed_at: None,
+                completed_visible_until: None,
+                completion_recorded: false,
+                context_percent: Some(40.0),
+                cost_usd: None,
+                model_name: None,
+                cwd: Some("/tmp/project-a".into()),
+                ai_tool: Some("codex".into()),
+                parent_session_id: None,
+            }],
+            feed: Vec::new(),
+            sessions: Vec::new(),
+            sparkline: Vec::new(),
+            metrics: DerivedMetrics {
+                total_agents: 1,
+                active_agents: 1,
+                waiting_agents: 0,
+                completed_agents: 0,
+                total_events: 0,
+                total_tokens: 100,
+                total_cost: 0.0,
+                avg_context_percent: 40.0,
+                velocity_per_min: 0,
+            },
+            available_skills: Vec::new(),
+            rankings: StageRankings::default(),
+        };
+
+        terminal.draw(|frame| draw(frame, &mut app, &snap)).unwrap();
+    }
+
+    #[test]
+    fn draw_does_not_panic_on_medium_terminal_with_agent_present() {
+        use crate::protocol::types::{Agent, AgentRole, AgentState, SkillKind};
+        use crate::store::metrics::DerivedMetrics;
+        use ratatui::{backend::TestBackend, Terminal};
+        use std::collections::HashMap;
+
+        ensure_theme();
+        let backend = TestBackend::new(38, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(8080);
+        let snap = StoreSnapshot {
+            agents: vec![Agent {
+                agent_id: "lead".into(),
+                display_name: "lead".into(),
+                short_id: "lead".into(),
+                first_seen_ts: 0,
+                state: AgentState::Active,
+                role: AgentRole::Main,
+                current_skill: Some(SkillKind::Bash),
+                branch_name: None,
+                skill_usage: HashMap::new(),
+                skills_invoked: HashMap::new(),
+                skill_last_seen: HashMap::new(),
+                command_usage: HashMap::new(),
+                command_last_seen: HashMap::new(),
+                total_tokens: 100,
+                usage_count: 5,
+                tool_run_count: 1,
+                last_event_ts: 1,
+                completed_at: None,
+                completed_visible_until: None,
+                completion_recorded: false,
+                context_percent: Some(40.0),
+                cost_usd: None,
+                model_name: None,
+                cwd: Some("/tmp/project-a".into()),
+                ai_tool: Some("codex".into()),
+                parent_session_id: None,
+            }],
+            feed: Vec::new(),
+            sessions: Vec::new(),
+            sparkline: Vec::new(),
+            metrics: DerivedMetrics {
+                total_agents: 1,
+                active_agents: 1,
+                waiting_agents: 0,
+                completed_agents: 0,
+                total_events: 0,
+                total_tokens: 100,
+                total_cost: 0.0,
+                avg_context_percent: 40.0,
+                velocity_per_min: 0,
+            },
+            available_skills: Vec::new(),
+            rankings: StageRankings::default(),
+        };
+
+        terminal.draw(|frame| draw(frame, &mut app, &snap)).unwrap();
+    }
 }
