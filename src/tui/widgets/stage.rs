@@ -1409,17 +1409,7 @@ fn leader_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -
     if compact_expressive_width <= width {
         return compact_expressive;
     }
-
-    let safe = RenderOptions {
-        profile: RenderProfile::Safe,
-        compact: true,
-    };
-    let safe_width = rendered_visible_width(&render_sprite(pixels, bg, safe));
-    if safe_width <= width && safe_width <= compact_expressive_width {
-        safe
-    } else {
-        compact_expressive
-    }
+    compact_expressive
 }
 
 fn party_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -> RenderOptions {
@@ -1574,6 +1564,36 @@ mod tests {
     }
 
     #[test]
+    fn wide_party_grid_keeps_full_expressive_render() {
+        let sprite = party::party_walking(0);
+        let options = party_render_options(18, ratatui::style::Color::Black, &sprite);
+        let lines = render_sprite(&sprite, ratatui::style::Color::Black, options);
+        let compact_lines = render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: true,
+            },
+        );
+
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(!options.compact);
+        assert!(rendered_canvas_width(&lines) > rendered_canvas_width(&compact_lines));
+        assert_eq!(
+            rendered_visible_width(&lines),
+            rendered_visible_width(&render_sprite(
+                &sprite,
+                ratatui::style::Color::Black,
+                RenderOptions {
+                    profile: RenderProfile::Expressive,
+                    compact: false,
+                },
+            ))
+        );
+    }
+
+    #[test]
     fn narrow_party_grid_uses_compact_expressive_render() {
         let sprite = party::party_walking(0);
         let options = party_render_options(7, ratatui::style::Color::Black, &sprite);
@@ -1585,7 +1605,7 @@ mod tests {
     }
 
     #[test]
-    fn narrow_empty_state_leader_uses_compact_expressive_render() {
+    fn empty_state_leader_uses_compact_expressive_render() {
         let sprite = leader::leader_idle(0);
         let options = leader_render_options(10, ratatui::style::Color::Black, &sprite);
         let lines = render_sprite(
