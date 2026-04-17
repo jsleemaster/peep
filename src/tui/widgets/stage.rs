@@ -1651,25 +1651,31 @@ mod tests {
     #[test]
     fn leader_and_party_profiles_do_not_return_empty_lines() {
         let leader_pixels = crate::tui::sprites::leader::leader_idle(0);
+        let leader_options = leader_render_options(44, ratatui::style::Color::Black, &leader_pixels);
         let leader_lines = crate::tui::sprites::renderer::render_sprite(
             &leader_pixels,
             ratatui::style::Color::Black,
-            crate::tui::sprites::renderer::RenderOptions {
-                profile: crate::tui::sprites::renderer::RenderProfile::Expressive,
-                compact: false,
-            },
+            leader_options,
         );
+        let leader_trimmed = trim_rendered_sprite_lines(&leader_lines);
         let party_pixels = crate::tui::sprites::party::party_walking(0);
+        let party_options = party_render_options(18, ratatui::style::Color::Black, &party_pixels);
         let party_lines = crate::tui::sprites::renderer::render_sprite(
             &party_pixels,
             ratatui::style::Color::Black,
-            crate::tui::sprites::renderer::RenderOptions {
-                profile: crate::tui::sprites::renderer::RenderProfile::Safe,
-                compact: true,
-            },
+            party_options,
         );
-        assert!(!leader_lines.is_empty());
-        assert!(!party_lines.is_empty());
+        let party_trimmed = trim_rendered_sprite_lines(&party_lines);
+
+        assert_eq!(leader_options.profile, RenderProfile::Expressive);
+        assert!(!leader_options.compact);
+        assert!(!leader_trimmed.is_empty());
+        assert!(rendered_canvas_width(&leader_trimmed) > 0);
+
+        assert_eq!(party_options.profile, RenderProfile::Expressive);
+        assert!(!party_options.compact);
+        assert!(!party_trimmed.is_empty());
+        assert!(rendered_canvas_width(&party_trimmed) > 0);
     }
 
     #[test]
