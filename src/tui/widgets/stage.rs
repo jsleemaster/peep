@@ -1391,7 +1391,34 @@ fn rendered_width(lines: &[Line<'_>]) -> u16 {
 }
 
 fn leader_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -> RenderOptions {
-    compact_fit_render_options(width, bg, pixels)
+    let full = RenderOptions {
+        profile: RenderProfile::Expressive,
+        compact: false,
+    };
+    let full_width = rendered_width(&render_sprite(pixels, bg, full));
+    if full_width <= width {
+        return full;
+    }
+
+    let compact_expressive = RenderOptions {
+        profile: RenderProfile::Expressive,
+        compact: true,
+    };
+    let compact_expressive_width = rendered_width(&render_sprite(pixels, bg, compact_expressive));
+    if compact_expressive_width <= width {
+        return compact_expressive;
+    }
+
+    let safe = RenderOptions {
+        profile: RenderProfile::Safe,
+        compact: true,
+    };
+    let safe_width = rendered_width(&render_sprite(pixels, bg, safe));
+    if safe_width <= width || safe_width < compact_expressive_width {
+        safe
+    } else {
+        compact_expressive
+    }
 }
 
 fn party_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -> RenderOptions {
@@ -1509,6 +1536,17 @@ mod tests {
         assert_eq!(options.profile, RenderProfile::Expressive);
         assert!(options.compact);
         assert!(rendered_width(&lines) <= 10);
+    }
+
+    #[test]
+    fn wide_leader_keeps_full_expressive_render() {
+        let sprite = leader::leader_idle(0);
+        let options = leader_render_options(44, ratatui::style::Color::Black, &sprite);
+        let lines = render_sprite(&sprite, ratatui::style::Color::Black, options);
+
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(!options.compact);
+        assert_eq!(rendered_width(&lines), 16);
     }
 
     #[test]
