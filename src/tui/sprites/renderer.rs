@@ -44,6 +44,49 @@ mod tests {
         );
         assert_eq!(lines.len(), 2);
     }
+
+    #[test]
+    fn expressive_renderer_uses_quadrant_glyph_and_majority_color() {
+        let red = Some(Color::Rgb(220, 40, 40));
+        let blue = Some(Color::Rgb(40, 40, 220));
+        let sprite = vec![vec![red, red], vec![blue, None]];
+
+        let lines = render_sprite(
+            &sprite,
+            Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: false,
+            },
+        );
+
+        assert_eq!(lines.len(), 1);
+        let span = &lines[0].spans[0];
+        assert_eq!(span.content.as_ref(), "▛▛");
+        assert_eq!(span.style.fg, red);
+        assert_eq!(span.style.bg, Some(Color::Black));
+    }
+
+    #[test]
+    fn safe_renderer_keeps_half_block_content_and_style() {
+        let green = Some(Color::Rgb(40, 180, 90));
+        let sprite = vec![vec![green, None], vec![None, None]];
+
+        let lines = render_sprite(
+            &sprite,
+            Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Safe,
+                compact: false,
+            },
+        );
+
+        assert_eq!(lines.len(), 1);
+        let span = &lines[0].spans[0];
+        assert_eq!(span.content.as_ref(), "▀▀");
+        assert_eq!(span.style.fg, green);
+        assert_eq!(span.style.bg, Some(Color::Black));
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,7 +231,24 @@ fn sprite_to_lines_quadrant(
 }
 
 fn dominant_color(colors: [Option<Color>; 4]) -> Option<Color> {
-    colors.into_iter().flatten().next()
+    let mut counts: Vec<(Color, usize, usize)> = Vec::new();
+    for (idx, color) in colors.into_iter().enumerate() {
+        let Some(color) = color else {
+            continue;
+        };
+
+        if let Some((_, count, _)) = counts.iter_mut().find(|(existing, _, _)| *existing == color)
+        {
+            *count += 1;
+        } else {
+            counts.push((color, 1, idx));
+        }
+    }
+
+    counts
+        .into_iter()
+        .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.2.cmp(&a.2)))
+        .map(|(color, _, _)| color)
 }
 
 fn quadrant_char(mask: u8) -> &'static str {
