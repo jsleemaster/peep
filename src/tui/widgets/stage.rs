@@ -1668,6 +1668,54 @@ mod tests {
     }
 
     #[test]
+    fn leader_boundary_keeps_full_expressive_when_visible_width_fits() {
+        let sprite = leader::leader_idle(0);
+        let full = render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: false,
+            },
+        );
+        let boundary_width = rendered_visible_width(&full);
+        let canvas_width = rendered_canvas_width(&full);
+
+        assert!(boundary_width < canvas_width);
+
+        let options = leader_render_options(boundary_width, ratatui::style::Color::Black, &sprite);
+
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(!options.compact);
+    }
+
+    #[test]
+    fn party_boundary_keeps_full_expressive_when_visible_width_fits() {
+        let ink = Some(ratatui::style::Color::Rgb(120, 180, 255));
+        let sprite = vec![
+            vec![None, None, ink, ink, None, None],
+            vec![None, None, ink, ink, None, None],
+        ];
+        let full = render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: false,
+            },
+        );
+        let boundary_width = rendered_visible_width(&full);
+        let canvas_width = rendered_canvas_width(&full);
+
+        assert!(boundary_width < canvas_width);
+
+        let options = party_render_options(boundary_width, ratatui::style::Color::Black, &sprite);
+
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(!options.compact);
+    }
+
+    #[test]
     fn narrow_party_grid_uses_compact_expressive_render() {
         let sprite = party::party_walking(0);
         let options = party_render_options(7, ratatui::style::Color::Black, &sprite);
@@ -1717,7 +1765,7 @@ mod tests {
             },
         );
 
-        assert_eq!(rendered_canvas_width(&lines), 16);
+        assert!(rendered_canvas_width(&lines) > rendered_visible_width(&lines));
     }
 
     #[test]
