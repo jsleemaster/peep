@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use crate::protocol::jsonl_payload::parse_jsonl_line;
-use crate::protocol::normalize::{extract_ranked_command, normalize_project_name};
+use crate::protocol::normalize::{
+    derive_agent_display_name, extract_ranked_command, normalize_project_name,
+    sanitize_agent_display_name,
+};
 use crate::protocol::types::{RawIngestEvent, RuntimeEventType};
 
 pub type SharedAnalytics = Arc<RwLock<AnalyticsStore>>;
@@ -363,8 +366,10 @@ impl AnalyticsStore {
                     let name = self
                         .agent_meta
                         .get(&agent_id)
-                        .map(|meta| meta.display_name.clone())
-                        .unwrap_or(agent_id.clone());
+                        .map(|meta| {
+                            sanitize_agent_display_name(Some(&meta.display_name), &agent_id)
+                        })
+                        .unwrap_or_else(|| sanitize_agent_display_name(None, &agent_id));
                     (name, count)
                 })
                 .collect(),
@@ -374,8 +379,10 @@ impl AnalyticsStore {
                     let name = self
                         .agent_meta
                         .get(&agent_id)
-                        .map(|meta| meta.display_name.clone())
-                        .unwrap_or(agent_id.clone());
+                        .map(|meta| {
+                            sanitize_agent_display_name(Some(&meta.display_name), &agent_id)
+                        })
+                        .unwrap_or_else(|| sanitize_agent_display_name(None, &agent_id));
                     (name, ts)
                 })
                 .collect(),
@@ -640,7 +647,7 @@ impl AnalyticsStore {
             }
 
             if let Some(raw) = parse_jsonl_line(&line) {
-                let display_name = derive_display_name(&raw);
+                let display_name = derive_agent_display_name(&raw);
                 let project = raw.cwd.as_deref().map(normalize_project_name);
                 self.ingest_runtime_event(&raw, &display_name, project.as_deref());
                 seen_agents
@@ -742,33 +749,6 @@ fn capture_file_states(paths: &[PathBuf]) -> Result<Vec<FileState>> {
     Ok(states)
 }
 
-fn derive_display_name(raw: &RawIngestEvent) -> String {
-    let agent_id = raw.agent_runtime_id.as_str();
-    let short_id = if agent_id.len() >= 8 {
-        &agent_id[..8]
-    } else {
-        agent_id
-    };
-
-    let is_sub = matches!(
-        raw.hook_event_name.as_deref(),
-        Some("AgentSpawn") | Some("Subagent")
-    );
-    if is_sub {
-        raw.detail
-            .as_deref()
-            .and_then(|detail| detail.split(" | ").next())
-            .or(raw.slug.as_deref())
-            .unwrap_or(short_id)
-            .to_string()
-    } else {
-        raw.slug
-            .clone()
-            .or_else(|| raw.session_runtime_id.clone())
-            .unwrap_or_else(|| short_id.to_string())
-    }
-}
-
 fn project_key(project: Option<&str>) -> String {
     project.unwrap_or(UNKNOWN_PROJECT).to_string()
 }
@@ -858,6 +838,7 @@ pub fn discover_jsonl_paths(base_dir: PathBuf) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{AnalyticsQuery, AnalyticsStore, AnalyticsWindow};
+    use crate::protocol::normalize::derive_agent_display_name;
     use crate::protocol::types::{IngestSource, RawIngestEvent, RuntimeEventType};
 
     fn raw_event(
@@ -963,5 +944,72 @@ mod tests {
 
         assert_eq!(yearly.commands[0].name, "cargo test");
         assert!(monthly.commands.is_empty());
+    }
+
+    #[test]
+    fn query_uses_specific_subagent_name_when_detail_is_conversational() {
+        let mut analytics = AnalyticsStore::default();
+        let raw = RawIngestEvent {
+            source: IngestSource::Jsonl,
+            agent_runtime_id: "session-alpha-12345678".into(),
+            session_runtime_id: Some("session-alpha".into()),
+            ts: 1_700_000_000,
+            event_type: RuntimeEventType::ToolStart,
+            hook_event_name: Some("Subagent".into()),
+            tool_name: Some("Bash".into()),
+            file_path: None,
+            detail: Some("I'll work on this task | prompt preview".into()),
+            total_tokens: None,
+            is_error: false,
+            branch_name: None,
+            slug: Some("parent-slug".into()),
+            cwd: Some("/tmp/project-a".into()),
+            ai_tool: Some("codex".into()),
+        };
+        let display_name = derive_agent_display_name(&raw);
+
+        analytics.ingest_runtime_event(&raw, &display_name, Some("project-a"));
+
+        let view = analytics.query(AnalyticsQuery::new(
+            AnalyticsWindow::Hours24,
+            Some("project-a"),
+            None,
+            1_700_000_100,
+        ));
+
+        assert_eq!(view.agents[0].name, "12345678");
+    }
+
+    #[test]
+    fn query_sanitizes_persisted_conversational_agent_names() {
+        let mut analytics = AnalyticsStore::default();
+        let raw = RawIngestEvent {
+            source: IngestSource::Jsonl,
+            agent_runtime_id: "session-alpha-12345678".into(),
+            session_runtime_id: Some("session-alpha".into()),
+            ts: 1_700_000_000,
+            event_type: RuntimeEventType::ToolStart,
+            hook_event_name: Some("Subagent".into()),
+            tool_name: Some("Bash".into()),
+            file_path: None,
+            detail: Some("git diff src/main.rs".into()),
+            total_tokens: None,
+            is_error: false,
+            branch_name: None,
+            slug: Some("parent-slug".into()),
+            cwd: Some("/tmp/project-a".into()),
+            ai_tool: Some("codex".into()),
+        };
+
+        analytics.ingest_runtime_event(&raw, "I'll work on this task", Some("project-a"));
+
+        let view = analytics.query(AnalyticsQuery::new(
+            AnalyticsWindow::Hours24,
+            Some("project-a"),
+            None,
+            1_700_000_100,
+        ));
+
+        assert_eq!(view.agents[0].name, "12345678");
     }
 }
