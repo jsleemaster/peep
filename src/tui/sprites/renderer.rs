@@ -89,6 +89,7 @@ mod tests {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderProfile {
     Expressive,
@@ -103,6 +104,7 @@ pub struct RenderOptions {
 
 /// Convert a sprite (2D grid of Option<Color>) to terminal lines using half-block rendering.
 /// Each pixel is rendered as 2 horizontal characters for square aspect ratio.
+#[allow(dead_code)]
 pub fn sprite_to_lines(pixels: &[Vec<Option<Color>>], bg: Color) -> Vec<Line<'static>> {
     render_sprite(
         pixels,
@@ -114,6 +116,7 @@ pub fn sprite_to_lines(pixels: &[Vec<Option<Color>>], bg: Color) -> Vec<Line<'st
     )
 }
 
+#[allow(dead_code)]
 pub fn sprite_to_lines_compact(pixels: &[Vec<Option<Color>>], bg: Color) -> Vec<Line<'static>> {
     render_sprite(
         pixels,
@@ -207,9 +210,21 @@ fn sprite_to_lines_quadrant(
         let mut x = 0;
         while x < width {
             let ul = pixels.get(y).and_then(|row| row.get(x)).copied().flatten();
-            let ur = pixels.get(y).and_then(|row| row.get(x + 1)).copied().flatten();
-            let ll = pixels.get(y + 1).and_then(|row| row.get(x)).copied().flatten();
-            let lr = pixels.get(y + 1).and_then(|row| row.get(x + 1)).copied().flatten();
+            let ur = pixels
+                .get(y)
+                .and_then(|row| row.get(x + 1))
+                .copied()
+                .flatten();
+            let ll = pixels
+                .get(y + 1)
+                .and_then(|row| row.get(x))
+                .copied()
+                .flatten();
+            let lr = pixels
+                .get(y + 1)
+                .and_then(|row| row.get(x + 1))
+                .copied()
+                .flatten();
             let mask = (ul.is_some() as u8)
                 | ((ur.is_some() as u8) << 1)
                 | ((ll.is_some() as u8) << 2)
@@ -219,7 +234,10 @@ fn sprite_to_lines_quadrant(
             let span = if compact {
                 Span::styled(glyph, Style::default().fg(fg).bg(bg))
             } else {
-                Span::styled(format!("{}{}", glyph, glyph), Style::default().fg(fg).bg(bg))
+                Span::styled(
+                    format!("{}{}", glyph, glyph),
+                    Style::default().fg(fg).bg(bg),
+                )
             };
             spans.push(span);
             x += 2;
@@ -237,7 +255,9 @@ fn dominant_color(colors: [Option<Color>; 4]) -> Option<Color> {
             continue;
         };
 
-        if let Some((_, count, _)) = counts.iter_mut().find(|(existing, _, _)| *existing == color)
+        if let Some((_, count, _)) = counts
+            .iter_mut()
+            .find(|(existing, _, _)| *existing == color)
         {
             *count += 1;
         } else {

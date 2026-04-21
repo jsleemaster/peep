@@ -48,7 +48,7 @@ pub fn get_projects(snap: &StoreSnapshot) -> Vec<String> {
         .into_iter()
         .map(|(name, (ts, _))| (name, ts))
         .collect();
-    projects.sort_by(|a, b| b.1.cmp(&a.1));
+    projects.sort_by_key(|(_, ts)| std::cmp::Reverse(*ts));
     projects.into_iter().map(|(name, _)| name).collect()
 }
 
@@ -1477,6 +1477,7 @@ fn party_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) ->
     }
 }
 
+#[cfg(test)]
 fn rendered_visible_width(lines: &[Line<'_>]) -> u16 {
     rendered_fit_width(lines)
 }

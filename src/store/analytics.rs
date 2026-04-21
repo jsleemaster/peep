@@ -21,8 +21,9 @@ const HOURLY_RETENTION_SECS: i64 = 35 * 24 * 60 * 60;
 const DAILY_RETENTION_SECS: i64 = 400 * 24 * 60 * 60;
 const UNKNOWN_PROJECT: &str = "__unknown__";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AnalyticsWindow {
+    #[default]
     Hours24,
     Days7,
     Days30,
@@ -64,12 +65,6 @@ impl AnalyticsWindow {
             AnalyticsWindow::Days30 => 30 * 24 * 60 * 60,
             AnalyticsWindow::Year1 => 365 * 24 * 60 * 60,
         }
-    }
-}
-
-impl Default for AnalyticsWindow {
-    fn default() -> Self {
-        Self::Hours24
     }
 }
 

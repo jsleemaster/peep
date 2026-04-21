@@ -54,6 +54,7 @@ pub fn leader_peck(frame: usize) -> Vec<Vec<Pixel>> {
     }
 }
 
+#[allow(dead_code)]
 pub fn leader_sleep(_frame: usize) -> Vec<Vec<Pixel>> {
     let palette = leader_palette();
     let mut sprite = leader_idle(0);
@@ -65,6 +66,7 @@ pub fn leader_sleep(_frame: usize) -> Vec<Vec<Pixel>> {
     sprite
 }
 
+#[allow(dead_code)]
 pub fn leader_done() -> Vec<Vec<Pixel>> {
     let mut sprite = leader_idle(0);
     sprite[0][10] = Some(Color::Rgb(255, 220, 80));
