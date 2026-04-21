@@ -12,8 +12,8 @@ use crate::protocol::types::{AgentRole, AgentState, FeedEvent};
 use crate::store::state::AppStore;
 use crate::tui::app::{App, RankingsSection};
 use crate::tui::render::{RankedEntry, StoreSnapshot};
-use crate::tui::sprites::chicken;
-use crate::tui::sprites::renderer::{sprite_to_lines, sprite_to_lines_compact};
+use crate::tui::sprites::renderer::{render_sprite, RenderOptions, RenderProfile};
+use crate::tui::sprites::{leader, party};
 use crate::tui::theme::theme;
 
 fn bg() -> Color {
@@ -48,7 +48,7 @@ pub fn get_projects(snap: &StoreSnapshot) -> Vec<String> {
         .into_iter()
         .map(|(name, (ts, _))| (name, ts))
         .collect();
-    projects.sort_by(|a, b| b.1.cmp(&a.1));
+    projects.sort_by_key(|(_, ts)| std::cmp::Reverse(*ts));
     projects.into_iter().map(|(name, _)| name).collect()
 }
 
@@ -216,33 +216,35 @@ fn render_empty_party(f: &mut Frame, area: Rect, _port: u16, tick: usize) {
         area,
     );
 
-    // Animated chicken sprite (alternates idle/peck)
-    let chicken_pixels = if (tick / 600).is_multiple_of(2) {
-        chicken::chicken_idle(tick / 150)
+    // Animated leader sprite (alternates idle/peck)
+    let leader_pixels = if (tick / 600).is_multiple_of(2) {
+        leader::leader_idle(tick / 150)
     } else {
-        chicken::chicken_peck(tick / 150)
+        leader::leader_peck(tick / 150)
     };
-    let chicken_lines = sprite_to_lines(&chicken_pixels, card_bg());
+    let leader_options = leader_render_options(area.width, card_bg(), &leader_pixels);
+    let leader_lines =
+        trim_rendered_sprite_lines(&render_sprite(&leader_pixels, card_bg(), leader_options));
+    let leader_w = rendered_canvas_width(&leader_lines).min(area.width);
 
     // Center everything
-    let content_height = chicken_lines.len() as u16 + 10; // sprite + text
+    let content_height = leader_lines.len() as u16 + 10; // sprite + text
     let start_y = area.y + area.height.saturating_sub(content_height) / 2;
     let center_x = area.x + area.width / 2;
 
-    // Draw chicken centered
-    let sprite_w = 28u16.min(area.width); // 14px * 2
-    let sprite_x = center_x.saturating_sub(sprite_w / 2);
-    for (j, line) in chicken_lines.iter().enumerate() {
+    // Draw leader centered
+    let sprite_x = center_x.saturating_sub(leader_w / 2);
+    for (j, line) in leader_lines.iter().enumerate() {
         let y = start_y + j as u16;
         if y < area.y + area.height {
             f.render_widget(
                 Paragraph::new(line.clone()).style(Style::default().bg(card_bg())),
-                Rect::new(sprite_x, y, sprite_w, 1),
+                Rect::new(sprite_x, y, leader_w, 1),
             );
         }
     }
 
-    let text_y = start_y + chicken_lines.len() as u16 + 1;
+    let text_y = start_y + leader_lines.len() as u16 + 1;
     let t = theme();
 
     // Title
@@ -324,18 +326,18 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     let (proj_agents, _proj_feed) = filter_snap_by_project(snap, &app.current_project);
 
     // Find the leader (AgentRole::Main or first agent)
-    let (leader, party_members) = match sidebar_agents(&proj_agents, chrono::Utc::now().timestamp())
-    {
-        Some(data) => data,
-        None => return,
-    };
+    let (lead_agent, party_members) =
+        match sidebar_agents(&proj_agents, chrono::Utc::now().timestamp()) {
+            Some(data) => data,
+            None => return,
+        };
 
     let mut y = li.y;
 
     // Leader name + badge
     let name_line = Line::from(vec![
         Span::styled(
-            format!(" {} ", leader.display_name),
+            format!(" {} ", lead_agent.display_name),
             Style::default()
                 .fg(theme().lead_name)
                 .add_modifier(Modifier::BOLD),
@@ -354,34 +356,36 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
     );
     y += 2; // padding after name
 
-    // Chicken sprite (leader is always a chicken)
+    // Leader sprite
     let tick = app.tick;
-    let is_active = leader.state == AgentState::Active;
-    let chicken_pixels = if is_active {
-        chicken::chicken_peck(tick / 4)
+    let is_active = lead_agent.state == AgentState::Active;
+    let leader_pixels = if is_active {
+        leader::leader_peck(tick / 4)
     } else {
-        chicken::chicken_idle(tick / 4)
+        leader::leader_idle(tick / 4)
     };
-    let chicken_lines = sprite_to_lines_compact(&chicken_pixels, card_bg());
-    let cw = 14u16.min(li.width);
-    let cx = li.x + (li.width.saturating_sub(cw)) / 2;
-    for (j, line) in chicken_lines.iter().enumerate() {
+    let leader_options = leader_render_options(li.width, card_bg(), &leader_pixels);
+    let leader_lines =
+        trim_rendered_sprite_lines(&render_sprite(&leader_pixels, card_bg(), leader_options));
+    let leader_w = rendered_canvas_width(&leader_lines).min(li.width);
+    let cx = li.x + (li.width.saturating_sub(leader_w)) / 2;
+    for (j, line) in leader_lines.iter().enumerate() {
         let sy = y + j as u16;
         if sy < li.y + li.height {
             f.render_widget(
                 Paragraph::new(line.clone()).style(Style::default().bg(card_bg())),
-                Rect::new(cx, sy, cw, 1),
+                Rect::new(cx, sy, leader_w, 1),
             );
         }
     }
-    y += chicken_lines.len() as u16; // padding after chicken
+    y += leader_lines.len() as u16; // padding after chicken
 
     // Leader stats: HP bar (100% = full health, decreases as context fills up)
     if y < li.y + li.height {
-        let used_pct = leader.context_percent.unwrap_or_else(|| {
+        let used_pct = lead_agent.context_percent.unwrap_or_else(|| {
             // Estimate from tokens: assume 1M context window
-            if leader.total_tokens > 0 {
-                ((leader.total_tokens as f64 / 1_000_000.0) * 100.0).min(100.0)
+            if lead_agent.total_tokens > 0 {
+                ((lead_agent.total_tokens as f64 / 1_000_000.0) * 100.0).min(100.0)
             } else {
                 0.0
             }
@@ -398,8 +402,8 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             t.hp_good
         };
 
-        let tokens_str = AppStore::format_tokens(leader.total_tokens);
-        let cost_str = leader
+        let tokens_str = AppStore::format_tokens(lead_agent.total_tokens);
+        let cost_str = lead_agent
             .cost_usd
             .map(|c| format!("${:.2}", c))
             .unwrap_or_else(|| "-".into());
@@ -461,7 +465,7 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
             let i = visible.start + row_idx;
 
             let is_done = member.state == AgentState::Completed;
-            let stage = chicken::agent_growth_stage(member.usage_count, is_done);
+            let stage = party::growth_stage(member.usage_count, is_done);
             let stage_icon = match stage {
                 "egg" => "\u{1f95a}",
                 "hatching" => "\u{1fab6}",
@@ -550,25 +554,21 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
 
             let is_done = member.state == AgentState::Completed;
             let is_waiting = member.state == AgentState::Waiting;
-            let stage = chicken::agent_growth_stage(member.usage_count, is_done);
+            let stage = party::growth_stage(member.usage_count, is_done);
 
             let sprite = match stage {
-                "egg" => chicken::egg_sprite(),
-                "hatching" => chicken::egg_cracking(tick / 3),
-                "peeking" => chicken::egg_hatching_chick(tick / 3),
-                "chick" if is_waiting => chicken::chick_sleeping(tick),
-                "chick" => chicken::chick_sprite(tick / 3),
-                "done" => chicken::chick_done(),
-                _ => chicken::egg_sprite(),
+                "egg" => party::party_egg(),
+                "hatching" => party::party_hatching(tick / 3),
+                "peeking" => party::party_peeking(tick / 3),
+                "chick" if is_waiting => party::party_sleeping(tick),
+                "chick" => party::party_walking(tick / 3),
+                "done" => party::party_done(),
+                _ => party::party_egg(),
             };
 
-            let spr_lines = sprite_to_lines_compact(&sprite, card_bg());
-            let spr_w = if stage == "egg" || stage == "hatching" {
-                6u16
-            } else {
-                8u16
-            }
-            .min(col_w);
+            let profile = party_render_options(col_w, card_bg(), &sprite);
+            let spr_lines = trim_rendered_sprite_lines(&render_sprite(&sprite, card_bg(), profile));
+            let spr_w = rendered_canvas_width(&spr_lines).min(col_w);
             let spr_x = mx + (col_w.saturating_sub(spr_w)) / 2;
 
             for (j, line) in spr_lines.iter().enumerate() {
@@ -1272,7 +1272,7 @@ fn sub_agent_stage_icon(e: &FeedEvent, snap: &StoreSnapshot) -> &'static str {
         .find(|a| a.agent_id == e.agent_id)
         .map(|a| {
             let is_done = a.state == AgentState::Completed;
-            match chicken::agent_growth_stage(a.usage_count, is_done) {
+            match party::growth_stage(a.usage_count, is_done) {
                 "egg" => "\u{1f95a}",
                 "hatching" => "\u{1fab6}",
                 "peeking" => "\u{1f425}",
@@ -1325,7 +1325,7 @@ pub fn party_summary(snap: &StoreSnapshot) -> String {
             continue; // skip leader, already counted
         }
         let is_done = agent.state == AgentState::Completed;
-        let stage = chicken::agent_growth_stage(agent.usage_count, is_done);
+        let stage = party::growth_stage(agent.usage_count, is_done);
         match stage {
             "chick" => chicks += 1,
             "done" => stars += 1,
@@ -1378,13 +1378,127 @@ fn party_row_layout(total_width: usize, status: &str) -> (usize, usize) {
     (name_width, status_width)
 }
 
+fn rendered_canvas_width(lines: &[Line<'_>]) -> u16 {
+    lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+                .sum::<usize>()
+        })
+        .max()
+        .unwrap_or(0)
+        .min(u16::MAX as usize) as u16
+}
+
+fn trim_rendered_sprite_lines(lines: &[Line<'_>]) -> Vec<Line<'static>> {
+    let (leading, trailing) = rendered_blank_span_margins(lines);
+    lines
+        .iter()
+        .map(|line| {
+            let len = line.spans.len();
+            let start = leading.min(len);
+            let end = len.saturating_sub(trailing).max(start);
+            let spans = if start >= end {
+                Vec::new()
+            } else {
+                line.spans[start..end]
+                    .iter()
+                    .map(|span| Span::styled(span.content.to_string(), span.style))
+                    .collect()
+            };
+            Line::from(spans)
+        })
+        .collect()
+}
+
+fn rendered_blank_span_margins(lines: &[Line<'_>]) -> (usize, usize) {
+    let blank = |span: &Span<'_>| span.content.chars().all(char::is_whitespace);
+    let min_len = lines.iter().map(|line| line.spans.len()).min().unwrap_or(0);
+
+    let mut leading = 0usize;
+    while leading < min_len
+        && lines
+            .iter()
+            .all(|line| line.spans.get(leading).is_none_or(blank))
+    {
+        leading += 1;
+    }
+
+    let mut trailing = 0usize;
+    while trailing < min_len.saturating_sub(leading)
+        && lines.iter().all(|line| {
+            let idx = line.spans.len().saturating_sub(1 + trailing);
+            line.spans.get(idx).is_none_or(blank)
+        })
+    {
+        trailing += 1;
+    }
+
+    (leading, trailing)
+}
+
+fn leader_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -> RenderOptions {
+    let full = RenderOptions {
+        profile: RenderProfile::Expressive,
+        compact: false,
+    };
+    let full_width = rendered_fit_width(&render_sprite(pixels, bg, full));
+    if full_width <= width {
+        return full;
+    }
+
+    let compact_expressive = RenderOptions {
+        profile: RenderProfile::Expressive,
+        compact: true,
+    };
+    let compact_expressive_width =
+        rendered_fit_width(&render_sprite(pixels, bg, compact_expressive));
+    if compact_expressive_width <= width {
+        return compact_expressive;
+    }
+    compact_expressive
+}
+
+fn party_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -> RenderOptions {
+    let expressive = RenderOptions {
+        profile: RenderProfile::Expressive,
+        compact: false,
+    };
+    let expressive_width = rendered_fit_width(&render_sprite(pixels, bg, expressive));
+    if expressive_width <= width {
+        return expressive;
+    }
+
+    RenderOptions {
+        profile: RenderProfile::Expressive,
+        compact: true,
+    }
+}
+
+#[cfg(test)]
+fn rendered_visible_width(lines: &[Line<'_>]) -> u16 {
+    rendered_fit_width(lines)
+}
+
+fn rendered_fit_width(lines: &[Line<'_>]) -> u16 {
+    rendered_canvas_width(&trim_rendered_sprite_lines(lines))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        party_row_layout, resolve_pending_focus_select, sidebar_agents, visible_party_window,
+        leader_render_options, party_render_options, party_row_layout, rendered_canvas_width,
+        rendered_fit_width, rendered_visible_width, resolve_pending_focus_select, sidebar_agents,
+        trim_rendered_sprite_lines, visible_party_window,
     };
     use crate::protocol::types::{Agent, AgentRole, AgentState, SkillKind};
     use crate::tui::app::App;
+    use crate::tui::sprites::leader;
+    use crate::tui::sprites::party;
+    use crate::tui::sprites::renderer::{render_sprite, RenderOptions, RenderProfile};
+    use ratatui::text::{Line, Span};
     use std::collections::HashMap;
 
     fn make_agent(agent_id: &str, role: AgentRole, parent_session_id: Option<&str>) -> Agent {
@@ -1437,6 +1551,266 @@ mod tests {
     fn party_row_layout_reserves_a_fixed_status_column() {
         assert_eq!(party_row_layout(40, "done"), (31, 6));
         assert_eq!(party_row_layout(40, "very-long-status"), (25, 12));
+    }
+
+    #[test]
+    fn narrow_leader_uses_compact_expressive_render() {
+        let sprite = leader::leader_idle(0);
+        let options = leader_render_options(10, ratatui::style::Color::Black, &sprite);
+        let lines = trim_rendered_sprite_lines(&render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            options,
+        ));
+
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(options.compact);
+        assert!(rendered_visible_width(&lines) <= 10);
+        assert_eq!(
+            rendered_canvas_width(&lines),
+            rendered_visible_width(&lines)
+        );
+    }
+
+    #[test]
+    fn wide_leader_keeps_full_expressive_render() {
+        let sprite = leader::leader_idle(0);
+        let options = leader_render_options(44, ratatui::style::Color::Black, &sprite);
+        let lines = trim_rendered_sprite_lines(&render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            options,
+        ));
+        let full_lines = trim_rendered_sprite_lines(&render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: false,
+            },
+        ));
+        let compact_lines = trim_rendered_sprite_lines(&render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: true,
+            },
+        ));
+
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(!options.compact);
+        assert!(rendered_canvas_width(&lines) > rendered_canvas_width(&compact_lines));
+        assert_eq!(
+            rendered_visible_width(&lines),
+            rendered_visible_width(&full_lines)
+        );
+        assert_eq!(
+            rendered_canvas_width(&lines),
+            rendered_visible_width(&lines)
+        );
+    }
+
+    #[test]
+    fn wide_party_grid_keeps_full_expressive_render() {
+        let sprite = party::party_walking(0);
+        let options = party_render_options(18, ratatui::style::Color::Black, &sprite);
+        let lines = trim_rendered_sprite_lines(&render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            options,
+        ));
+        let compact_lines = trim_rendered_sprite_lines(&render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: true,
+            },
+        ));
+
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(!options.compact);
+        assert!(rendered_canvas_width(&lines) > rendered_canvas_width(&compact_lines));
+        assert_eq!(
+            rendered_visible_width(&lines),
+            rendered_visible_width(&render_sprite(
+                &sprite,
+                ratatui::style::Color::Black,
+                RenderOptions {
+                    profile: RenderProfile::Expressive,
+                    compact: false,
+                },
+            ))
+        );
+        assert_eq!(
+            rendered_canvas_width(&lines),
+            rendered_visible_width(&lines)
+        );
+    }
+
+    #[test]
+    fn leader_and_party_profiles_do_not_return_empty_lines() {
+        let leader_pixels = crate::tui::sprites::leader::leader_idle(0);
+        let leader_options = leader_render_options(44, ratatui::style::Color::Black, &leader_pixels);
+        let leader_lines = crate::tui::sprites::renderer::render_sprite(
+            &leader_pixels,
+            ratatui::style::Color::Black,
+            leader_options,
+        );
+        let leader_trimmed = trim_rendered_sprite_lines(&leader_lines);
+        let party_pixels = crate::tui::sprites::party::party_walking(0);
+        let party_options = party_render_options(18, ratatui::style::Color::Black, &party_pixels);
+        let party_lines = crate::tui::sprites::renderer::render_sprite(
+            &party_pixels,
+            ratatui::style::Color::Black,
+            party_options,
+        );
+        let party_trimmed = trim_rendered_sprite_lines(&party_lines);
+
+        assert_eq!(leader_options.profile, RenderProfile::Expressive);
+        assert!(!leader_options.compact);
+        assert!(!leader_trimmed.is_empty());
+        assert!(rendered_canvas_width(&leader_trimmed) > 0);
+
+        assert_eq!(party_options.profile, RenderProfile::Expressive);
+        assert!(!party_options.compact);
+        assert!(!party_trimmed.is_empty());
+        assert!(rendered_canvas_width(&party_trimmed) > 0);
+    }
+
+    #[test]
+    fn leader_boundary_keeps_full_expressive_when_visible_width_fits() {
+        let sprite = leader::leader_idle(0);
+        let full = render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: false,
+            },
+        );
+        let boundary_width = rendered_visible_width(&full);
+        let canvas_width = rendered_canvas_width(&full);
+
+        assert!(boundary_width < canvas_width);
+
+        let options = leader_render_options(boundary_width, ratatui::style::Color::Black, &sprite);
+
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(!options.compact);
+    }
+
+    #[test]
+    fn party_boundary_keeps_full_expressive_when_visible_width_fits() {
+        let ink = Some(ratatui::style::Color::Rgb(120, 180, 255));
+        let sprite = vec![
+            vec![None, None, ink, ink, None, None],
+            vec![None, None, ink, ink, None, None],
+        ];
+        let full = render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: false,
+            },
+        );
+        let boundary_width = rendered_visible_width(&full);
+        let canvas_width = rendered_canvas_width(&full);
+
+        assert!(boundary_width < canvas_width);
+
+        let options = party_render_options(boundary_width, ratatui::style::Color::Black, &sprite);
+
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(!options.compact);
+    }
+
+    #[test]
+    fn asymmetric_silhouette_fit_width_matches_trimmed_box() {
+        let ink = Span::raw("XX");
+        let lines = vec![
+            Line::from(vec![
+                Span::raw(" "),
+                Span::raw(" "),
+                ink.clone(),
+                ink.clone(),
+                Span::raw(" "),
+            ]),
+            Line::from(vec![
+                Span::raw(" "),
+                ink.clone(),
+                ink.clone(),
+                Span::raw(" "),
+                Span::raw(" "),
+            ]),
+        ];
+        let trimmed = trim_rendered_sprite_lines(&lines);
+
+        assert!(rendered_canvas_width(&trimmed) < rendered_canvas_width(&lines));
+        assert_eq!(rendered_fit_width(&lines), rendered_canvas_width(&trimmed));
+        assert_eq!(rendered_fit_width(&lines), rendered_visible_width(&lines));
+    }
+
+    #[test]
+    fn narrow_party_grid_uses_compact_expressive_render() {
+        let sprite = party::party_walking(0);
+        let options = party_render_options(7, ratatui::style::Color::Black, &sprite);
+        let lines = trim_rendered_sprite_lines(&render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            options,
+        ));
+
+        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert!(options.compact);
+        assert!(rendered_visible_width(&lines) <= 7);
+        assert_eq!(
+            rendered_canvas_width(&lines),
+            rendered_visible_width(&lines)
+        );
+    }
+
+    #[test]
+    fn trimmed_expressive_leader_lines_remove_canvas_padding() {
+        let sprite = leader::leader_idle(0);
+        let full = render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: false,
+            },
+        );
+        let trimmed = trim_rendered_sprite_lines(&full);
+
+        assert!(rendered_canvas_width(&trimmed) < rendered_canvas_width(&full));
+        assert_eq!(
+            rendered_canvas_width(&trimmed),
+            rendered_visible_width(&full)
+        );
+    }
+
+    #[test]
+    fn rendered_width_matches_expressive_leader_output() {
+        let lines = render_sprite(
+            &leader::leader_idle(0),
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: false,
+            },
+        );
+
+        assert!(rendered_canvas_width(&lines) > rendered_visible_width(&lines));
+    }
+
+    #[test]
+    fn visible_width_helper_ignores_blank_margins() {
+        let line = Line::from(vec![Span::raw("   "), Span::raw("abc"), Span::raw("   ")]);
+
+        assert_eq!(rendered_visible_width(&[line]), 3);
     }
 
     #[test]

@@ -204,11 +204,10 @@ impl App {
             KeyCode::Char('.') => self.next_window(),
 
             // Enter: in sidebar = filter rankings by selected agent
-            KeyCode::Enter => {
-                if self.focus == FocusPane::Sidebar {
-                    self.pending_focus_select = true;
-                }
+            KeyCode::Enter if self.focus == FocusPane::Sidebar => {
+                self.pending_focus_select = true;
             }
+            KeyCode::Enter => {}
 
             // Filter
             KeyCode::Char('f') => {

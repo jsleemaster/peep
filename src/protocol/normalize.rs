@@ -1,4 +1,4 @@
-use super::types::{RuntimeEventType, SkillKind};
+use super::types::{RawIngestEvent, RuntimeEventType, SkillKind};
 
 pub fn map_hook_event_to_runtime_type(name: &str) -> RuntimeEventType {
     match name
@@ -69,6 +69,36 @@ pub fn normalize_project_name(cwd: &str) -> String {
     }
 
     cwd.rsplit('/').next().unwrap_or(cwd).to_string()
+}
+
+pub fn derive_agent_display_name(raw: &RawIngestEvent) -> String {
+    let is_subagent = is_subagent_event(raw.hook_event_name.as_deref());
+    let short_id = derive_agent_short_id(&raw.agent_runtime_id, is_subagent);
+
+    if is_subagent {
+        return extract_subagent_name(raw.detail.as_deref()).unwrap_or(short_id);
+    }
+
+    raw.slug
+        .clone()
+        .or_else(|| raw.session_runtime_id.clone())
+        .unwrap_or(short_id)
+}
+
+pub fn derive_agent_short_id(agent_id: &str, is_subagent: bool) -> String {
+    if is_subagent {
+        let tail = agent_id.rsplit('-').next().unwrap_or(agent_id);
+        last_n_chars(tail, 8)
+    } else {
+        agent_id.chars().take(8).collect()
+    }
+}
+
+pub fn sanitize_agent_display_name(display_name: Option<&str>, agent_id: &str) -> String {
+    display_name
+        .filter(|name| looks_like_stable_agent_name(name.trim()))
+        .map(|name| name.trim().to_string())
+        .unwrap_or_else(|| derive_agent_short_id(agent_id, true))
 }
 
 pub fn normalize_ranked_command(input: &str) -> Option<String> {
@@ -151,6 +181,35 @@ fn takes_subcommand(command: &str) -> bool {
     )
 }
 
+fn is_subagent_event(hook_event_name: Option<&str>) -> bool {
+    matches!(hook_event_name, Some("AgentSpawn") | Some("Subagent"))
+}
+
+fn extract_subagent_name(detail: Option<&str>) -> Option<String> {
+    let candidate = detail?.split(" | ").next()?.trim();
+    if looks_like_stable_agent_name(candidate) {
+        Some(candidate.to_string())
+    } else {
+        None
+    }
+}
+
+fn looks_like_stable_agent_name(candidate: &str) -> bool {
+    !candidate.is_empty()
+        && candidate.len() <= 48
+        && !candidate.chars().any(char::is_whitespace)
+        && candidate
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && candidate.chars().any(|c| c.is_ascii_alphabetic())
+}
+
+fn last_n_chars(input: &str, count: usize) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let start = chars.len().saturating_sub(count);
+    chars[start..].iter().collect()
+}
+
 fn is_likely_command_input(input: &str) -> bool {
     let Some(command) = normalize_ranked_command(input) else {
         return false;
@@ -186,4 +245,74 @@ fn is_likely_command_input(input: &str) -> bool {
             | "docker"
             | "kubectl"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{derive_agent_display_name, derive_agent_short_id, sanitize_agent_display_name};
+    use crate::protocol::types::{IngestSource, RawIngestEvent, RuntimeEventType};
+
+    fn subagent_event(agent_id: &str, detail: &str) -> RawIngestEvent {
+        RawIngestEvent {
+            source: IngestSource::Jsonl,
+            agent_runtime_id: agent_id.to_string(),
+            session_runtime_id: Some("session-alpha".into()),
+            ts: 10,
+            event_type: RuntimeEventType::ToolStart,
+            hook_event_name: Some("Subagent".into()),
+            tool_name: Some("Bash".into()),
+            file_path: None,
+            detail: Some(detail.to_string()),
+            total_tokens: None,
+            is_error: false,
+            branch_name: None,
+            slug: Some("parent-slug".into()),
+            cwd: Some("/tmp/project-a".into()),
+            ai_tool: Some("codex".into()),
+        }
+    }
+
+    #[test]
+    fn derive_agent_display_name_rejects_conversational_subagent_detail() {
+        let raw = subagent_event(
+            "session-alpha-12345678",
+            "I'll work on this task | prompt preview",
+        );
+
+        assert_eq!(derive_agent_display_name(&raw), "12345678");
+    }
+
+    #[test]
+    fn derive_agent_display_name_accepts_slug_like_subagent_label() {
+        let raw = subagent_event("session-alpha-12345678", "code-reviewer | prompt preview");
+
+        assert_eq!(derive_agent_display_name(&raw), "code-reviewer");
+    }
+
+    #[test]
+    fn derive_agent_short_id_uses_tail_for_subagents() {
+        assert_eq!(
+            derive_agent_short_id("session-alpha-12345678", true),
+            "12345678"
+        );
+        assert_eq!(
+            derive_agent_short_id("main-worker-0001abcd", false),
+            "main-wor"
+        );
+    }
+
+    #[test]
+    fn sanitize_agent_display_name_replaces_conversational_labels_with_specific_id() {
+        assert_eq!(
+            sanitize_agent_display_name(
+                Some("I'll work on this task"),
+                "session-alpha-12345678"
+            ),
+            "12345678"
+        );
+        assert_eq!(
+            sanitize_agent_display_name(Some("code-reviewer"), "session-alpha-12345678"),
+            "code-reviewer"
+        );
+    }
 }

@@ -165,7 +165,7 @@ mod tests {
     use crate::store::metrics::DerivedMetrics;
     use crate::tui::app::App;
     use crate::tui::theme::{init_theme, Theme};
-    use ratatui::{backend::TestBackend, Terminal};
+    use ratatui::{backend::TestBackend, buffer::Buffer, Terminal};
     use std::sync::Once;
 
     fn ensure_theme() {
@@ -194,6 +194,97 @@ mod tests {
             available_skills: Vec::new(),
             rankings: StageRankings::default(),
         }
+    }
+
+    fn active_agent_snapshot() -> StoreSnapshot {
+        use crate::protocol::types::{Agent, AgentRole, AgentState, SkillKind};
+        use std::collections::HashMap;
+
+        ensure_theme();
+        StoreSnapshot {
+            agents: vec![Agent {
+                agent_id: "lead".into(),
+                display_name: "lead".into(),
+                short_id: "lead".into(),
+                first_seen_ts: 0,
+                state: AgentState::Active,
+                role: AgentRole::Main,
+                current_skill: Some(SkillKind::Bash),
+                branch_name: None,
+                skill_usage: HashMap::new(),
+                skills_invoked: HashMap::new(),
+                skill_last_seen: HashMap::new(),
+                command_usage: HashMap::new(),
+                command_last_seen: HashMap::new(),
+                total_tokens: 100,
+                usage_count: 5,
+                tool_run_count: 1,
+                last_event_ts: 1,
+                completed_at: None,
+                completed_visible_until: None,
+                completion_recorded: false,
+                context_percent: Some(40.0),
+                cost_usd: None,
+                model_name: None,
+                cwd: Some("/tmp/project-a".into()),
+                ai_tool: Some("codex".into()),
+                parent_session_id: None,
+            }],
+            feed: Vec::new(),
+            sessions: Vec::new(),
+            sparkline: Vec::new(),
+            metrics: DerivedMetrics {
+                total_agents: 1,
+                active_agents: 1,
+                waiting_agents: 0,
+                completed_agents: 0,
+                total_events: 0,
+                total_tokens: 100,
+                total_cost: 0.0,
+                avg_context_percent: 40.0,
+                velocity_per_min: 0,
+            },
+            available_skills: Vec::new(),
+            rankings: StageRankings::default(),
+        }
+    }
+
+    fn buffer_row_text(buffer: &Buffer, y: u16) -> String {
+        (0..buffer.area.width)
+            .map(|x| buffer.cell((x, y)).map(|cell| cell.symbol()).unwrap_or(" "))
+            .collect()
+    }
+
+    fn find_row(buffer: &Buffer, needle: &str) -> Option<u16> {
+        (0..buffer.area.height).find(|&y| buffer_row_text(buffer, y).contains(needle))
+    }
+
+    fn buffer_contains_leader_sprite_glyphs(buffer: &Buffer) -> bool {
+        const SPRITE_GLYPHS: [char; 14] = [
+            '▀', '▄', '▐', '▌', '▛', '▜', '▙', '▟', '▚', '▞', '▖', '▗', '▘', '▝',
+        ];
+
+        let Some(lead_row) = find_row(buffer, "lead") else {
+            return false;
+        };
+        let Some(hp_row) = find_row(buffer, " HP ") else {
+            return false;
+        };
+        if hp_row <= lead_row + 1 {
+            return false;
+        }
+
+        for y in (lead_row + 1)..hp_row {
+            for x in 0..buffer.area.width {
+                if let Some(cell) = buffer.cell((x, y)) {
+                    if cell.symbol().chars().any(|ch| SPRITE_GLYPHS.contains(&ch)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
     }
 
     fn raw_event(
@@ -450,5 +541,27 @@ mod tests {
         let snap = empty_snapshot();
 
         terminal.draw(|frame| draw(frame, &mut app, &snap)).unwrap();
+    }
+
+    #[test]
+    fn draw_renders_non_empty_output_with_agent_present() {
+        let backend = TestBackend::new(60, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(8080);
+        let snap = active_agent_snapshot();
+
+        terminal.draw(|frame| draw(frame, &mut app, &snap)).unwrap();
+        assert!(buffer_contains_leader_sprite_glyphs(terminal.backend().buffer()));
+    }
+
+    #[test]
+    fn draw_does_not_panic_on_medium_terminal_with_agent_present() {
+        let backend = TestBackend::new(38, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(8080);
+        let snap = active_agent_snapshot();
+
+        terminal.draw(|frame| draw(frame, &mut app, &snap)).unwrap();
+        assert!(buffer_contains_leader_sprite_glyphs(terminal.backend().buffer()));
     }
 }

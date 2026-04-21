@@ -2,7 +2,9 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::protocol::normalize::{extract_ranked_command, tool_name_to_skill};
+use crate::protocol::normalize::{
+    derive_agent_display_name, derive_agent_short_id, extract_ranked_command, tool_name_to_skill,
+};
 use crate::protocol::types::*;
 use crate::store::analytics::CompletedAgentRecord;
 
@@ -39,11 +41,12 @@ impl AppStore {
     /// Apply a raw ingest event: upsert agent, append feed event, update metrics.
     pub fn apply_event(&mut self, raw: RawIngestEvent) {
         let agent_id = raw.agent_runtime_id.clone();
-        let short_id = if agent_id.len() >= 8 {
-            agent_id[..8].to_string()
-        } else {
-            agent_id.clone()
-        };
+        let is_subagent = matches!(
+            raw.hook_event_name.as_deref(),
+            Some("AgentSpawn") | Some("Subagent")
+        );
+        let short_id = derive_agent_short_id(&agent_id, is_subagent);
+        let display_name = derive_agent_display_name(&raw);
 
         let skill = raw.tool_name.as_deref().map(tool_name_to_skill);
 
@@ -58,32 +61,13 @@ impl AppStore {
 
         // Upsert agent
         let agent = self.agents.entry(agent_id.clone()).or_insert_with(|| {
-            // Sub-agents: use description part (before |) as name
-            // Others: slug > session_runtime_id > short_id
-            let is_sub = matches!(
-                raw.hook_event_name.as_deref(),
-                Some("AgentSpawn") | Some("Subagent")
-            );
-            let display_name = if is_sub {
-                raw.detail
-                    .as_deref()
-                    .and_then(|d| d.split(" | ").next())
-                    .or(raw.slug.as_deref())
-                    .unwrap_or(&short_id)
-                    .to_string()
-            } else {
-                raw.slug
-                    .clone()
-                    .or_else(|| raw.session_runtime_id.clone())
-                    .unwrap_or_else(|| short_id.clone())
-            };
             Agent {
                 agent_id: agent_id.clone(),
-                display_name,
+                display_name: display_name.clone(),
                 short_id: short_id.clone(),
                 first_seen_ts: raw.ts,
                 state: new_state,
-                role: if is_sub {
+                role: if is_subagent {
                     AgentRole::Subagent
                 } else {
                     AgentRole::Main
@@ -110,6 +94,10 @@ impl AppStore {
                 parent_session_id: raw.session_runtime_id.clone(),
             }
         });
+
+        if agent.display_name == agent.short_id && display_name != agent.display_name {
+            agent.display_name = display_name.clone();
+        }
 
         if agent.state == AgentState::Completed && raw.ts > agent.last_event_ts {
             agent.completed_at = None;
@@ -774,5 +762,32 @@ mod tests {
 
         let completions_again = store.gc_stale_agents(500);
         assert!(completions_again.is_empty());
+    }
+
+    #[test]
+    fn apply_event_uses_specific_subagent_name_when_detail_is_conversational() {
+        let mut store = AppStore::new();
+
+        store.apply_event(RawIngestEvent {
+            source: IngestSource::Jsonl,
+            agent_runtime_id: "session-alpha-12345678".into(),
+            session_runtime_id: Some("session-alpha".into()),
+            ts: 10,
+            event_type: RuntimeEventType::ToolStart,
+            hook_event_name: Some("Subagent".into()),
+            tool_name: Some("Bash".into()),
+            file_path: None,
+            detail: Some("I'll work on this task | prompt preview".into()),
+            total_tokens: None,
+            is_error: false,
+            branch_name: None,
+            slug: Some("parent-slug".into()),
+            cwd: Some("/tmp/project-a".into()),
+            ai_tool: Some("codex".into()),
+        });
+
+        let agent = store.agents.get("session-alpha-12345678").unwrap();
+        assert_eq!(agent.display_name, "12345678");
+        assert_eq!(agent.short_id, "12345678");
     }
 }
