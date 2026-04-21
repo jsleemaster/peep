@@ -1,6 +1,6 @@
 [package]
 name = "peep"
-version = "0.6.8"
+version = "0.6.9"
 edition = "2021"
 description = "Peep into your AI coding agents — terminal dashboard with pixel art"
 license = "MIT"
