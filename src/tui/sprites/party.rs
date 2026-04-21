@@ -79,21 +79,21 @@ pub fn party_walking(frame: usize) -> Vec<Vec<Pixel>> {
 
     if frame % 6 < 3 {
         vec![
-            vec![n, n, b, b, b, n, n, n],
-            vec![n, b, b, b, b, b, n, n],
-            vec![n, b, e, b, b, b, beak, n],
-            vec![n, b, b, b, b, b, n, n],
-            vec![n, m, b, b, m, b, n, n],
-            vec![n, n, feet, n, feet, n, n, n],
+            vec![n, n, b, b, b, b, n, n],
+            vec![n, b, b, b, b, b, b, n],
+            vec![b, b, e, b, b, b, beak, beak],
+            vec![b, b, b, b, b, b, b, n],
+            vec![n, b, m, b, b, m, b, n],
+            vec![feet, feet, n, feet, feet, n, n, n],
         ]
     } else {
         vec![
-            vec![n, n, b, b, b, n, n, n],
-            vec![n, b, b, b, b, b, n, n],
-            vec![n, b, e, b, b, b, beak, n],
-            vec![n, m, b, b, b, b, n, n],
-            vec![n, n, b, m, b, n, n, n],
-            vec![n, feet, n, n, feet, n, n, n],
+            vec![n, n, b, b, b, b, n, n],
+            vec![n, b, b, b, b, b, b, n],
+            vec![b, b, e, b, b, b, beak, beak],
+            vec![b, b, b, b, b, b, b, n],
+            vec![b, m, b, b, m, b, n, n],
+            vec![n, feet, feet, n, feet, feet, n, n],
         ]
     }
 }
