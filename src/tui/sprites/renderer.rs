@@ -6,6 +6,7 @@ use ratatui::{
 #[cfg(test)]
 mod tests {
     use super::{render_sprite, RenderOptions, RenderProfile};
+    use crate::tui::sprites::{leader, party};
     use ratatui::style::Color;
 
     fn sample_sprite() -> Vec<Vec<Option<Color>>> {
@@ -86,6 +87,52 @@ mod tests {
         assert_eq!(span.content.as_ref(), "▀▀");
         assert_eq!(span.style.fg, green);
         assert_eq!(span.style.bg, Some(Color::Black));
+    }
+
+    fn count_sparse_quadrants(lines: &[ratatui::text::Line<'_>]) -> usize {
+        let sparse = ['▘', '▝', '▖', '▗', '▚', '▞'];
+        lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .filter_map(|span| span.content.chars().next())
+            .filter(|ch| sparse.contains(ch))
+            .count()
+    }
+
+    #[test]
+    fn expressive_leader_avoids_excessive_sparse_outline_glyphs() {
+        let lines = render_sprite(
+            &leader::leader_idle(0),
+            Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: false,
+            },
+        );
+
+        assert!(
+            count_sparse_quadrants(&lines) <= 5,
+            "leader sparse quadrant count was {}",
+            count_sparse_quadrants(&lines)
+        );
+    }
+
+    #[test]
+    fn expressive_party_chick_avoids_excessive_sparse_outline_glyphs() {
+        let lines = render_sprite(
+            &party::party_walking(0),
+            Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Expressive,
+                compact: false,
+            },
+        );
+
+        assert!(
+            count_sparse_quadrants(&lines) <= 3,
+            "party sparse quadrant count was {}",
+            count_sparse_quadrants(&lines)
+        );
     }
 }
 

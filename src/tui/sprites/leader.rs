@@ -20,13 +20,13 @@ pub fn leader_idle(frame: usize) -> Vec<Vec<Pixel>> {
     let n = n();
 
     vec![
-        vec![n, n, n, comb, comb, n, n, n, n, n, n, n, n, n, n, n],
-        vec![n, n, h, h, h, h, h, n, n, n, n, n, n, n, n, n],
-        vec![n, h, h, eye, h, h, h, beak, beak, n, n, n, n, n, n, n],
-        vec![n, h, h, h, h, h, h, h, m, n, n, n, n, n, n, n],
-        vec![n, n, h, h, h, h, h, h, h, h, n, n, n, n, n, n],
-        vec![n, h, h, h, h, h, h, h, h, h, h, n, n, n, n, n],
-        vec![h, h, h, h, m, m, h, h, h, h, h, h, n, n, n, n],
+        vec![n, n, comb, comb, comb, comb, comb, comb, n, n, n, n, n, n, n, n],
+        vec![n, n, h, h, h, h, h, h, h, n, n, n, n, n, n, n],
+        vec![n, h, h, eye, h, h, h, h, beak, beak, n, n, n, n, n, n],
+        vec![n, h, h, h, h, h, h, h, h, h, n, n, n, n, n, n],
+        vec![h, h, h, h, h, h, h, h, h, h, h, n, n, n, n, n],
+        vec![h, h, h, h, h, h, h, h, h, h, h, h, n, n, n, n],
+        vec![h, h, h, h, m, m, h, h, h, h, h, h, h, n, n, n],
         vec![h, h, h, m, s, m, m, h, h, h, h, h, h, n, n, n],
         vec![h, h, h, m, m, b, h, h, h, h, h, h, h, n, n, n],
         vec![n, h, h, h, h, h, m, m, h, h, h, h, n, n, n, n],
