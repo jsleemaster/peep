@@ -12,6 +12,7 @@ pub enum FocusPane {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RankingsSection {
+    Tools,
     Commands,
     Skills,
     Agents,
@@ -20,15 +21,17 @@ pub enum RankingsSection {
 impl RankingsSection {
     fn next(self) -> Self {
         match self {
+            RankingsSection::Tools => RankingsSection::Commands,
             RankingsSection::Commands => RankingsSection::Skills,
             RankingsSection::Skills => RankingsSection::Agents,
-            RankingsSection::Agents => RankingsSection::Commands,
+            RankingsSection::Agents => RankingsSection::Tools,
         }
     }
 
     fn prev(self) -> Self {
         match self {
-            RankingsSection::Commands => RankingsSection::Agents,
+            RankingsSection::Tools => RankingsSection::Agents,
+            RankingsSection::Commands => RankingsSection::Tools,
             RankingsSection::Skills => RankingsSection::Commands,
             RankingsSection::Agents => RankingsSection::Skills,
         }
@@ -46,6 +49,7 @@ pub struct App {
     // Scroll / selection state
     pub sidebar_selected: usize,
     pub sidebar_count: usize,
+    pub tools_scroll_offset: usize,
     pub commands_scroll_offset: usize,
     pub skills_scroll_offset: usize,
     pub agents_scroll_offset: usize,
@@ -54,6 +58,7 @@ pub struct App {
 
     // Cached counts for scroll bounds (updated each frame from store snapshot)
     pub agent_count: usize,
+    pub tools_count: usize,
     pub commands_count: usize,
     pub skills_count: usize,
     pub rankings_agents_count: usize,
@@ -83,12 +88,14 @@ impl App {
             filter_text: String::new(),
             sidebar_selected: 0,
             sidebar_count: 0,
+            tools_scroll_offset: 0,
             commands_scroll_offset: 0,
             skills_scroll_offset: 0,
             agents_scroll_offset: 0,
-            rankings_section: RankingsSection::Commands,
+            rankings_section: RankingsSection::Tools,
             rankings_window: AnalyticsWindow::Hours24,
             agent_count: 0,
+            tools_count: 0,
             commands_count: 0,
             skills_count: 0,
             rankings_agents_count: 0,
@@ -106,6 +113,7 @@ impl App {
     pub fn update_counts(
         &mut self,
         sidebar_count: usize,
+        tools_count: usize,
         commands_count: usize,
         skills_count: usize,
         agents_count: usize,
@@ -113,10 +121,12 @@ impl App {
     ) {
         self.sidebar_count = sidebar_count;
         self.agent_count = sidebar_count;
+        self.tools_count = tools_count;
         self.commands_count = commands_count;
         self.skills_count = skills_count;
         self.rankings_agents_count = agents_count;
         self.session_count = session_count;
+        self.tools_scroll_offset = self.tools_scroll_offset.min(tools_count.saturating_sub(1));
         self.commands_scroll_offset = self
             .commands_scroll_offset
             .min(commands_count.saturating_sub(1));
@@ -314,6 +324,7 @@ impl App {
     }
 
     fn reset_rankings_scroll(&mut self) {
+        self.tools_scroll_offset = 0;
         self.commands_scroll_offset = 0;
         self.skills_scroll_offset = 0;
         self.agents_scroll_offset = 0;
@@ -321,6 +332,7 @@ impl App {
 
     fn active_section_count(&self) -> usize {
         match self.rankings_section {
+            RankingsSection::Tools => self.tools_count,
             RankingsSection::Commands => self.commands_count,
             RankingsSection::Skills => self.skills_count,
             RankingsSection::Agents => self.rankings_agents_count,
@@ -329,6 +341,7 @@ impl App {
 
     fn active_section_offset_mut(&mut self) -> &mut usize {
         match self.rankings_section {
+            RankingsSection::Tools => &mut self.tools_scroll_offset,
             RankingsSection::Commands => &mut self.commands_scroll_offset,
             RankingsSection::Skills => &mut self.skills_scroll_offset,
             RankingsSection::Agents => &mut self.agents_scroll_offset,
@@ -387,6 +400,11 @@ mod tests {
     fn tab_cycles_rankings_sections() {
         let mut app = App::new(8080);
         app.focus = FocusPane::MainPanel;
+
+        assert_eq!(app.rankings_section, RankingsSection::Tools);
+
+        app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.rankings_section, RankingsSection::Commands);
 
         app.handle_key(key(KeyCode::Tab));
         assert_eq!(app.rankings_section, RankingsSection::Skills);

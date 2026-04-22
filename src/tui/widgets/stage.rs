@@ -120,8 +120,9 @@ pub fn sidebar_item_count(snap: &StoreSnapshot, project: &Option<String>) -> usi
         .unwrap_or(0)
 }
 
-pub fn main_panel_item_counts(snap: &StoreSnapshot) -> (usize, usize, usize) {
+pub fn main_panel_item_counts(snap: &StoreSnapshot) -> (usize, usize, usize, usize) {
     (
+        snap.rankings.tools.len(),
         snap.rankings.commands.len(),
         snap.rankings.skills.len(),
         snap.rankings.agents.len(),
@@ -721,6 +722,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
             Constraint::Fill(1),
             Constraint::Fill(1),
             Constraint::Fill(1),
+            Constraint::Fill(1),
         ])
         .split(inner);
 
@@ -728,6 +730,16 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     render_rankings_section(
         f,
         sections[1],
+        "tools",
+        &rankings.tools,
+        app.tools_scroll_offset,
+        app.rankings_section == RankingsSection::Tools
+            && app.focus == crate::tui::app::FocusPane::MainPanel,
+        false,
+    );
+    render_rankings_section(
+        f,
+        sections[2],
         "commands",
         &rankings.commands,
         app.commands_scroll_offset,
@@ -737,7 +749,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     );
     render_rankings_section(
         f,
-        sections[2],
+        sections[3],
         "skills",
         &rankings.skills,
         app.skills_scroll_offset,
@@ -747,7 +759,7 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot
     );
     render_rankings_section(
         f,
-        sections[3],
+        sections[4],
         "agents",
         &rankings.agents,
         app.agents_scroll_offset,
@@ -772,6 +784,7 @@ fn resolve_pending_focus_select(app: &mut App, proj_agents: &[&crate::protocol::
             app.focused_agent = None;
         }
     }
+    app.tools_scroll_offset = 0;
     app.commands_scroll_offset = 0;
     app.skills_scroll_offset = 0;
     app.agents_scroll_offset = 0;

@@ -338,10 +338,11 @@ async fn main() -> Result<()> {
         .await;
         let sidebar_count =
             crate::tui::widgets::stage::sidebar_item_count(&snap, &app.current_project);
-        let (commands_count, skills_count, agents_count) =
+        let (tools_count, commands_count, skills_count, agents_count) =
             crate::tui::widgets::stage::main_panel_item_counts(&snap);
         app.update_counts(
             sidebar_count,
+            tools_count,
             commands_count,
             skills_count,
             agents_count,
