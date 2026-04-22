@@ -36,9 +36,9 @@ pub fn leader_idle(frame: usize) -> Vec<Vec<Pixel>> {
         ".............CC.....",
         "............CCHH....",
         "....SSSS....HHHHKK..",
-        "..SSSMMM...HHHEHKKK.",
+        "...SSMMM...HHHEHKKK.",
         "..SSMMHHHHHHHHHHHK..",
-        ".SSMMHHHHHHHHHHHH...",
+        "..SSMMHHHHHHHHHHH...",
         "SSMMHHHHHMMMMHHH....",
         "SSMMHHHMMMSSMMHH....",
         ".SSMMHHHMMBBBBMM....",
@@ -133,5 +133,30 @@ mod tests {
 
         assert_eq!(sprite.len(), 16);
         assert!(sprite.iter().all(|row| row.len() == 20));
+    }
+
+    #[test]
+    fn leader_half_block_footprint_stays_compact() {
+        let sprite = leader_idle(0);
+        let mut max_pair_width = 0usize;
+
+        for rows in sprite.chunks(2) {
+            let top = &rows[0];
+            let bottom = rows.get(1);
+            let occupied: Vec<bool> = top
+                .iter()
+                .enumerate()
+                .map(|(idx, cell)| {
+                    cell.is_some() || bottom.and_then(|row| row.get(idx)).is_some_and(Option::is_some)
+                })
+                .collect();
+            let Some(left) = occupied.iter().position(|cell| *cell) else {
+                continue;
+            };
+            let right = occupied.iter().rposition(|cell| *cell).unwrap();
+            max_pair_width = max_pair_width.max(right - left + 1);
+        }
+
+        assert!(max_pair_width <= 16, "leader too wide: {max_pair_width}");
     }
 }
