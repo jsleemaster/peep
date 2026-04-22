@@ -133,6 +133,7 @@ fn render_scenario_svg(scenario: Scenario) -> Result<String> {
     app.tick = 2400;
     app.update_counts(
         snap.agents.len(),
+        snap.rankings.tools.len(),
         snap.rankings.commands.len(),
         snap.rankings.skills.len(),
         snap.rankings.agents.len(),
@@ -190,6 +191,11 @@ fn snapshot_from_store(store: &AppStore) -> StoreSnapshot {
             window: view.summary.window,
             agents_used: view.summary.agents_used,
             completed: view.summary.completed,
+            tools: view
+                .tools
+                .into_iter()
+                .map(|entry| RankedEntry::new(entry.name, entry.count, entry.last_seen))
+                .collect(),
             commands: view
                 .commands
                 .into_iter()
