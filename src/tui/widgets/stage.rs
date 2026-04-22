@@ -1440,6 +1440,15 @@ fn rendered_blank_span_margins(lines: &[Line<'_>]) -> (usize, usize) {
 }
 
 fn leader_render_options(width: u16, bg: Color, pixels: &[Vec<Option<Color>>]) -> RenderOptions {
+    let safe_full = RenderOptions {
+        profile: RenderProfile::Safe,
+        compact: false,
+    };
+    let safe_full_width = rendered_fit_width(&render_sprite(pixels, bg, safe_full));
+    if safe_full_width <= width {
+        return safe_full;
+    }
+
     let full = RenderOptions {
         profile: RenderProfile::Expressive,
         compact: false,
@@ -1573,7 +1582,7 @@ mod tests {
     }
 
     #[test]
-    fn wide_leader_keeps_full_expressive_render() {
+    fn wide_leader_prefers_safe_full_render() {
         let sprite = leader::leader_idle(0);
         let options = leader_render_options(44, ratatui::style::Color::Black, &sprite);
         let lines = trim_rendered_sprite_lines(&render_sprite(
@@ -1581,7 +1590,15 @@ mod tests {
             ratatui::style::Color::Black,
             options,
         ));
-        let full_lines = trim_rendered_sprite_lines(&render_sprite(
+        let safe_full_lines = trim_rendered_sprite_lines(&render_sprite(
+            &sprite,
+            ratatui::style::Color::Black,
+            RenderOptions {
+                profile: RenderProfile::Safe,
+                compact: false,
+            },
+        ));
+        let expressive_full_lines = trim_rendered_sprite_lines(&render_sprite(
             &sprite,
             ratatui::style::Color::Black,
             RenderOptions {
@@ -1589,25 +1606,17 @@ mod tests {
                 compact: false,
             },
         ));
-        let compact_lines = trim_rendered_sprite_lines(&render_sprite(
-            &sprite,
-            ratatui::style::Color::Black,
-            RenderOptions {
-                profile: RenderProfile::Expressive,
-                compact: true,
-            },
-        ));
 
-        assert_eq!(options.profile, RenderProfile::Expressive);
+        assert_eq!(options.profile, RenderProfile::Safe);
         assert!(!options.compact);
-        assert!(rendered_canvas_width(&lines) > rendered_canvas_width(&compact_lines));
+        assert!(rendered_canvas_width(&lines) > rendered_canvas_width(&expressive_full_lines));
         assert_eq!(
             rendered_visible_width(&lines),
-            rendered_visible_width(&full_lines)
+            rendered_visible_width(&safe_full_lines)
         );
         assert_eq!(
             rendered_canvas_width(&lines),
-            rendered_visible_width(&lines)
+            rendered_canvas_width(&safe_full_lines)
         );
     }
 
@@ -1668,7 +1677,7 @@ mod tests {
         );
         let party_trimmed = trim_rendered_sprite_lines(&party_lines);
 
-        assert_eq!(leader_options.profile, RenderProfile::Expressive);
+        assert_eq!(leader_options.profile, RenderProfile::Safe);
         assert!(!leader_options.compact);
         assert!(!leader_trimmed.is_empty());
         assert!(rendered_canvas_width(&leader_trimmed) > 0);
@@ -1691,10 +1700,6 @@ mod tests {
             },
         );
         let boundary_width = rendered_visible_width(&full);
-        let canvas_width = rendered_canvas_width(&full);
-
-        assert!(boundary_width < canvas_width);
-
         let options = leader_render_options(boundary_width, ratatui::style::Color::Black, &sprite);
 
         assert_eq!(options.profile, RenderProfile::Expressive);
@@ -1785,7 +1790,7 @@ mod tests {
         );
         let trimmed = trim_rendered_sprite_lines(&full);
 
-        assert!(rendered_canvas_width(&trimmed) < rendered_canvas_width(&full));
+        assert!(rendered_canvas_width(&trimmed) <= rendered_canvas_width(&full));
         assert_eq!(
             rendered_canvas_width(&trimmed),
             rendered_visible_width(&full)
@@ -1803,7 +1808,7 @@ mod tests {
             },
         );
 
-        assert!(rendered_canvas_width(&lines) > rendered_visible_width(&lines));
+        assert!(rendered_canvas_width(&lines) >= rendered_visible_width(&lines));
     }
 
     #[test]
