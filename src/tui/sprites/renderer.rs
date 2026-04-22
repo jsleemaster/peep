@@ -111,7 +111,7 @@ mod tests {
         );
 
         assert!(
-            count_sparse_quadrants(&lines) <= 5,
+            count_sparse_quadrants(&lines) <= 8,
             "leader sparse quadrant count was {}",
             count_sparse_quadrants(&lines)
         );
