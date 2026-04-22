@@ -119,6 +119,7 @@ pub struct AnalyticsSummary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnalyticsView {
     pub summary: AnalyticsSummary,
+    pub tools: Vec<AnalyticsEntry>,
     pub commands: Vec<AnalyticsEntry>,
     pub skills: Vec<AnalyticsEntry>,
     pub agents: Vec<AnalyticsEntry>,
@@ -150,6 +151,8 @@ struct ProjectBucket {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct AgentBucket {
+    tools: HashMap<String, u64>,
+    tool_last_seen: HashMap<String, i64>,
     commands: HashMap<String, u64>,
     command_last_seen: HashMap<String, i64>,
     skills: HashMap<String, u64>,
@@ -287,6 +290,8 @@ impl AnalyticsStore {
     }
 
     pub fn query(&self, query: AnalyticsQuery<'_>) -> AnalyticsView {
+        let mut tool_counts = HashMap::<String, u64>::new();
+        let mut tool_last_seen = HashMap::<String, i64>::new();
         let mut command_counts = HashMap::<String, u64>::new();
         let mut command_last_seen = HashMap::<String, i64>::new();
         let mut skill_counts = HashMap::<String, u64>::new();
@@ -337,6 +342,12 @@ impl AnalyticsStore {
                     }
 
                     merge_rankings(
+                        &mut tool_counts,
+                        &mut tool_last_seen,
+                        &stats.tools,
+                        &stats.tool_last_seen,
+                    );
+                    merge_rankings(
                         &mut command_counts,
                         &mut command_last_seen,
                         &stats.commands,
@@ -352,6 +363,7 @@ impl AnalyticsStore {
             }
         }
 
+        let tools = sorted_entries(tool_counts, tool_last_seen);
         let commands = sorted_entries(command_counts, command_last_seen);
         let skills = sorted_entries(skill_counts, skill_last_seen);
         let agents = sorted_entries(
@@ -389,6 +401,7 @@ impl AnalyticsStore {
                 agents_used: agents_used.len(),
                 completed: completed_agents.len(),
             },
+            tools,
             commands,
             skills,
             agents,
@@ -514,8 +527,10 @@ impl AnalyticsStore {
             agent_bucket.last_seen = agent_bucket.last_seen.max(raw.ts);
 
             if raw.event_type == RuntimeEventType::ToolStart {
-                if raw.tool_name.is_some() {
+                if let Some(tool_name) = raw.tool_name.clone() {
                     agent_bucket.workload += 1;
+                    *agent_bucket.tools.entry(tool_name.clone()).or_insert(0) += 1;
+                    agent_bucket.tool_last_seen.insert(tool_name, raw.ts);
                 }
                 if let Some(command_name) =
                     extract_ranked_command(raw.tool_name.as_deref(), raw.detail.as_deref())
@@ -902,9 +917,64 @@ mod tests {
 
         assert_eq!(view.summary.agents_used, 2);
         assert_eq!(view.summary.completed, 1);
+        assert!(view.tools.iter().any(|entry| entry.name == "Bash"));
         assert_eq!(view.commands[0].name, "git diff");
         assert_eq!(view.skills[0].name, "superpowers:brainstorming");
         assert_eq!(view.agents[0].name, "agent-b");
+    }
+
+    #[test]
+    fn query_separates_tool_counts_from_command_counts() {
+        let mut analytics = AnalyticsStore::default();
+
+        analytics.ingest_runtime_event(
+            &raw_event(
+                "agent-a",
+                1_700_000_000,
+                RuntimeEventType::ToolStart,
+                Some("Bash"),
+                Some("git diff --stat"),
+                "/tmp/project-a",
+            ),
+            "agent-a",
+            Some("project-a"),
+        );
+        analytics.ingest_runtime_event(
+            &raw_event(
+                "agent-a",
+                1_700_000_010,
+                RuntimeEventType::ToolStart,
+                Some("Bash"),
+                Some("cd /tmp/project-a"),
+                "/tmp/project-a",
+            ),
+            "agent-a",
+            Some("project-a"),
+        );
+        analytics.ingest_runtime_event(
+            &raw_event(
+                "agent-a",
+                1_700_000_020,
+                RuntimeEventType::ToolStart,
+                Some("Skill"),
+                Some("superpowers:brainstorming scope"),
+                "/tmp/project-a",
+            ),
+            "agent-a",
+            Some("project-a"),
+        );
+
+        let view = analytics.query(AnalyticsQuery::new(
+            AnalyticsWindow::Hours24,
+            Some("project-a"),
+            None,
+            1_700_000_100,
+        ));
+
+        assert_eq!(view.tools[0].name, "Bash");
+        assert_eq!(view.tools[0].count, 2);
+        assert_eq!(view.commands[0].name, "cd");
+        assert_eq!(view.commands[0].count, 1);
     }
 
     #[test]
