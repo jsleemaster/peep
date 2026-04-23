@@ -615,7 +615,8 @@ fn render_left_panel(f: &mut Frame, area: Rect, app: &App, snap: &StoreSnapshot)
                     match stage {
                         "egg" => Color::Rgb(200, 195, 180),
                         "hatching" | "peeking" => Color::Rgb(230, 200, 100),
-                        "chick" | "done" => Color::Rgb(255, 220, 80),
+                        "chick" => Color::Rgb(255, 220, 80),
+                        "done" => Color::Rgb(170, 160, 110),
                         _ => dim(),
                     }
                 };
