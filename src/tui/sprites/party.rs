@@ -58,29 +58,47 @@ pub fn party_egg() -> Vec<Vec<Pixel>> {
 }
 
 pub fn party_hatching(frame: usize) -> Vec<Vec<Pixel>> {
-    let mut egg = party_egg();
-    let crack = Some(egg_palette().outline);
-
-    if frame % 6 < 3 {
-        egg[2][2] = crack;
-        egg[3][3] = crack;
-        egg[4][1] = crack;
+    let p = egg_palette();
+    let rows = if frame % 6 < 3 {
+        [
+            "........",
+            "..H..H..",
+            ".HBOOM..",
+            ".BBOBM..",
+            ".BOBBMS.",
+            ".BBBBMS.",
+            "..BBSS..",
+            "...SS...",
+        ]
     } else {
-        egg[2][3] = crack;
-        egg[3][2] = crack;
-        egg[4][4] = crack;
-    }
+        [
+            "........",
+            "..H..H..",
+            ".HOOBM..",
+            ".BBOBM..",
+            ".BBOBMS.",
+            ".BBBBMS.",
+            "..BBSS..",
+            "...SS...",
+        ]
+    };
 
-    egg
+    rows.into_iter()
+        .map(|row| party_row(row, Some(p.eye), p))
+        .collect()
 }
 
 pub fn party_peeking(frame: usize) -> Vec<Vec<Pixel>> {
     let mut egg = party_hatching(frame);
     let p = chick_palette();
+    egg[0][2] = Some(p.base);
     egg[0][3] = Some(p.base);
     egg[0][4] = Some(p.base);
-    egg[1][3] = Some(p.base);
-    egg[1][4] = Some(p.eye);
+    egg[0][5] = Some(p.base);
+    egg[1][1] = Some(p.base);
+    egg[1][2] = Some(p.base);
+    egg[1][3] = Some(p.eye);
+    egg[1][4] = Some(p.base);
     egg[1][5] = Some(p.beak);
     egg
 }
@@ -128,10 +146,18 @@ pub fn party_sleeping(_frame: usize) -> Vec<Vec<Pixel>> {
 }
 
 pub fn party_done() -> Vec<Vec<Pixel>> {
-    let mut sprite = party_walking(0);
-    sprite[0][7] = Some(Color::Rgb(255, 220, 80));
-    sprite[1][7] = Some(Color::Rgb(255, 220, 80));
-    sprite
+    let p = chick_palette();
+    [
+        "....BB....",
+        "..BBBBK...",
+        ".BBMMBB...",
+        ".BBBBBB...",
+        "..MBBM....",
+        "...F.F....",
+    ]
+    .into_iter()
+    .map(|row| party_row(row, Some(Color::Rgb(255, 220, 80)), p))
+    .collect()
 }
 
 pub use party_done as chick_done;
@@ -211,5 +237,34 @@ mod tests {
         let head_mass = region_count(&sprite, 6..10, 0..4);
 
         assert!(head_mass >= 10, "head/front region too small: {head_mass}");
+    }
+
+    #[test]
+    fn party_done_uses_a_distinct_tucked_pose() {
+        let walking = party_walking(0);
+        let done = party_done();
+
+        assert!(row_width(&done, 0) < row_width(&walking, 0));
+        assert!(row_width(&done, 3) < row_width(&walking, 3));
+        assert!(
+            region_count(&done, 0..10, 0..6) >= 1,
+            "done sprite should still render visible body pixels"
+        );
+        assert_ne!(walking, done);
+    }
+
+    #[test]
+    fn party_hatching_and_peeking_have_distinct_top_silhouettes() {
+        let hatching = party_hatching(0);
+        let peeking = party_peeking(0);
+        let hatching_top = row_width(&hatching, 0);
+        let peeking_top = row_width(&peeking, 0);
+        let hatching_head = region_count(&hatching, 2..7, 0..2);
+        let peeking_head = region_count(&peeking, 2..7, 0..2);
+
+        assert!(hatching_top <= 1);
+        assert!(peeking_top >= 4, "peeking top silhouette too small: {peeking_top}");
+        assert!(peeking_head >= 7, "peeking head region too small: {peeking_head}");
+        assert!(peeking_head > hatching_head);
     }
 }
